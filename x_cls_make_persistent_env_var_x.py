@@ -2,6 +2,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from typing import Optional, Tuple, List, Dict
+import os
 
 
 # Hardcoded token keys we manage via the GUI
@@ -18,10 +19,20 @@ class x_cls_make_persistent_env_var_x:
     Provides set/get helpers used by the GUI-only main program.
     """
 
-    def __init__(self, var: str, value: str = "", quiet: bool = False) -> None:
+    def __init__(self, var: str = "", value: str = "", quiet: bool = False, tokens: Optional[List[Tuple[str, str]]] = None) -> None:
+        """Create a helper instance.
+
+        Args:
+            var: optional variable name for set/get operations on this instance.
+            value: optional value used when setting.
+            quiet: suppress printed output for instance methods.
+            tokens: optional list of (VAR, LABEL) pairs this helper should manage; defaults to module `_TOKENS`.
+        """
         self.var = var
         self.value = value
         self.quiet = quiet
+        # tokens the instance manages
+        self.tokens = tokens if tokens is not None else _TOKENS
 
     def set_user_env(self) -> bool:
         cmd = f'[Environment]::SetEnvironmentVariable("{self.var}", "{self.value}", "User")'
@@ -39,6 +50,76 @@ class x_cls_make_persistent_env_var_x:
     @staticmethod
     def run_powershell(command: str) -> subprocess.CompletedProcess:
         return subprocess.run(["powershell", "-Command", command], capture_output=True, text=True)
+
+    def persist_current(self) -> int:
+        """Persist any of the configured token vars present in the current process env into the Windows User environment.
+
+        Returns exit code 0 on success (any persisted), 2 if nothing persisted.
+        """
+        any_changed = False
+        for var, _label in self.tokens:
+            val = os.environ.get(var)
+            if not val:
+                if not self.quiet:
+                    print(f"{var}: not present in current shell; skipping")
+                continue
+            setter = x_cls_make_persistent_env_var_x(var, val, quiet=self.quiet, tokens=self.tokens)
+            ok = setter.set_user_env()
+            if ok:
+                any_changed = True
+                if not self.quiet:
+                    print(f"{var}: persisted to User environment (will appear in new shells)")
+            else:
+                if not self.quiet:
+                    print(f"{var}: failed to persist to User environment")
+        if any_changed:
+            if not self.quiet:
+                print("Done. Open a NEW PowerShell window for changes to take effect in new shells.")
+            return 0
+        else:
+            if not self.quiet:
+                print("No variables were persisted.")
+            return 2
+
+    def run_gui(self) -> int:
+        """Run the GUI interactive flow. Returns exit code (0 success, 1 partial failure, 2 cancelled/error)."""
+        vals = _open_gui_and_collect()
+        if vals is None:
+            if not self.quiet:
+                print("GUI unavailable or cancelled; aborting.")
+            return 2
+
+        summaries = []
+        ok_all = True
+        for var, _label in self.tokens:
+            val = vals.get(var, "")
+            if not val:
+                summaries.append((var, False, "<empty>"))
+                ok_all = False
+                continue
+            obj = x_cls_make_persistent_env_var_x(var, val, quiet=self.quiet, tokens=self.tokens)
+            ok = obj.set_user_env()
+            stored = obj.get_user_env()
+            summaries.append((var, ok, stored))
+            if not (ok and stored == val):
+                ok_all = False
+
+        if not self.quiet:
+            print("Results:")
+            for var, ok, stored in summaries:
+                if stored is None or stored == "<empty>" or stored == "":
+                    shown = "<not set>"
+                else:
+                    shown = "<hidden>"
+                print(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
+
+        if not ok_all:
+            if not self.quiet:
+                print("Some values were not set correctly.")
+            return 1
+        if not self.quiet:
+            print("All values set. Open a NEW PowerShell window for changes to take effect in new shells.")
+        return 0
 
 
 def _open_gui_and_collect() -> Optional[Dict[str, str]]:
@@ -121,36 +202,7 @@ def _open_gui_and_collect() -> Optional[Dict[str, str]]:
 
 
 if __name__ == "__main__":
-    vals = _open_gui_and_collect()
-    if vals is None:
-        print("GUI unavailable or cancelled; aborting.")
-        sys.exit(2)
-
-    summaries = []
-    ok_all = True
-    for var, _label in _TOKENS:
-        val = vals.get(var, "")
-        if not val:
-            summaries.append((var, False, "<empty>"))
-            ok_all = False
-            continue
-        obj = x_cls_make_persistent_env_var_x(var, val)
-        ok = obj.set_user_env()
-        stored = obj.get_user_env()
-        summaries.append((var, ok, stored))
-        if not (ok and stored == val):
-            ok_all = False
-
-    print("Results:")
-    for var, ok, stored in summaries:
-        if stored is None or stored == "<empty>" or stored == "":
-            shown = "<not set>"
-        else:
-            shown = "<hidden>"
-        print(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
-
-    if not ok_all:
-        print("Some values were not set correctly.")
-        sys.exit(1)
-    print("All values set. Open a NEW PowerShell window for changes to take effect in new shells.")
-    sys.exit(0)
+    # Minimal entrypoint: instantiate and run the GUI-only flow.
+    inst = x_cls_make_persistent_env_var_x()
+    code = inst.run_gui()
+    sys.exit(code)
