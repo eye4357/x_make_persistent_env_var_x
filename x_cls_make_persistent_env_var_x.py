@@ -143,7 +143,11 @@ if __name__ == "__main__":
 
     print("Results:")
     for var, ok, stored in summaries:
-        print(f"- {var}: set={'yes' if ok else 'no'} | stored={stored!r}")
+        if stored is None or stored == "<empty>" or stored == "":
+            shown = "<not set>"
+        else:
+            shown = "<hidden>"
+        print(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
     if not ok_all:
         print("Some values were not set correctly.")
