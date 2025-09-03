@@ -1,12 +1,11 @@
 from __future__ import annotations
+
+import os
 import subprocess
 import sys
-from typing import Optional, Tuple, List, Dict
-import os
-
 
 # Hardcoded token keys we manage via the GUI
-_TOKENS: List[Tuple[str, str]] = [
+_TOKENS: list[tuple[str, str]] = [
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
     ("PYPI_API_TOKEN", "PyPI API Token"),
     ("GITHUB_TOKEN", "GitHub Token"),
@@ -19,7 +18,13 @@ class x_cls_make_persistent_env_var_x:
     Provides set/get helpers used by the GUI-only main program.
     """
 
-    def __init__(self, var: str = "", value: str = "", quiet: bool = False, tokens: Optional[List[Tuple[str, str]]] = None) -> None:
+    def __init__(
+        self,
+        var: str = "",
+        value: str = "",
+        quiet: bool = False,
+        tokens: list[tuple[str, str]] | None = None,
+    ) -> None:
         """Create a helper instance.
 
         Args:
@@ -39,7 +44,7 @@ class x_cls_make_persistent_env_var_x:
         result = self.run_powershell(cmd)
         return result.returncode == 0
 
-    def get_user_env(self) -> Optional[str]:
+    def get_user_env(self) -> str | None:
         cmd = f'[Environment]::GetEnvironmentVariable("{self.var}", "User")'
         result = self.run_powershell(cmd)
         if result.returncode != 0:
@@ -48,8 +53,13 @@ class x_cls_make_persistent_env_var_x:
         return value or None
 
     @staticmethod
-    def run_powershell(command: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["powershell", "-Command", command], capture_output=True, text=True)
+    def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["powershell", "-Command", command],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
     def persist_current(self) -> int:
         """Persist any of the configured token vars present in the current process env into the Windows User environment.
@@ -69,12 +79,13 @@ class x_cls_make_persistent_env_var_x:
                 any_changed = True
                 if not self.quiet:
                     print(f"{var}: persisted to User environment (will appear in new shells)")
-            else:
-                if not self.quiet:
-                    print(f"{var}: failed to persist to User environment")
+            elif not self.quiet:
+                print(f"{var}: failed to persist to User environment")
         if any_changed:
             if not self.quiet:
-                print("Done. Open a NEW PowerShell window for changes to take effect in new shells.")
+                print(
+                    "Done. Open a NEW PowerShell window for changes to take effect in new shells."
+                )
             return 0
         else:
             if not self.quiet:
@@ -89,7 +100,8 @@ class x_cls_make_persistent_env_var_x:
                 print("GUI unavailable or cancelled; aborting.")
             return 2
 
-        summaries = []
+        # summaries: list of (var, ok, stored_value) where stored_value may be None
+        summaries: list[tuple[str, bool, str | None]] = []
         ok_all = True
         for var, _label in self.tokens:
             val = vals.get(var, "")
@@ -107,7 +119,7 @@ class x_cls_make_persistent_env_var_x:
         if not self.quiet:
             print("Results:")
             for var, ok, stored in summaries:
-                if stored is None or stored == "<empty>" or stored == "":
+                if stored is None or stored in {"<empty>", ""}:
                     shown = "<not set>"
                 else:
                     shown = "<hidden>"
@@ -118,35 +130,51 @@ class x_cls_make_persistent_env_var_x:
                 print("Some values were not set correctly.")
             return 1
         if not self.quiet:
-            print("All values set. Open a NEW PowerShell window for changes to take effect in new shells.")
+            print(
+                "All values set. Open a NEW PowerShell window for changes to take effect in new shells."
+            )
         return 0
 
 
-def _open_gui_and_collect() -> Optional[Dict[str, str]]:
+def _open_gui_and_collect() -> dict[str, str] | None:
     """Open a small Tkinter window to collect the hardcoded token values.
 
     Returns a dict mapping var -> value or None if GUI unavailable / cancelled.
     """
     try:
-        import tkinter as tk
+        import tkinter as _tk
     except Exception:
         return None
 
-    root = tk.Tk()
-    root.title("Set persistent tokens")
-    entries: Dict[str, tk.Entry] = {}
+    prefill = _collect_prefill()
+    root, entries, show_var, result = _build_gui_parts(_tk, prefill)
+    return _run_gui_loop(root, entries, show_var, result)
 
-    # Prefill with existing values if present
-    prefill: Dict[str, str] = {}
+
+def _collect_prefill() -> dict[str, str]:
+    """Collect existing user-scope values for the managed tokens."""
+    prefill: dict[str, str] = {}
     for var, _label in _TOKENS:
         cur = x_cls_make_persistent_env_var_x(var).get_user_env()
         if cur:
             prefill[var] = cur
+    return prefill
 
-    frame = tk.Frame(root, padx=10, pady=10)
-    frame.pack(fill=tk.BOTH, expand=True)
 
-    show_var = tk.BooleanVar(value=False)
+def _build_gui_parts(tk_mod, prefill: dict[str, str]):
+    """Build widgets and layout; return (root, entries, show_var, result).
+
+    Splitting widget construction into a helper reduces the statement count in the top-level
+    orchestration function so linters like ruff don't flag PLR limits.
+    """
+    root = tk_mod.Tk()
+    root.title("Set persistent tokens")
+    entries: dict[str, tk_mod.Entry] = {}
+
+    frame = tk_mod.Frame(root, padx=10, pady=10)
+    frame.pack(fill=tk_mod.BOTH, expand=True)
+
+    show_var = tk_mod.BooleanVar(value=False)
 
     def toggle_show() -> None:
         ch = "" if show_var.get() else "*"
@@ -155,23 +183,23 @@ def _open_gui_and_collect() -> Optional[Dict[str, str]]:
 
     row = 0
     for var, label_text in _TOKENS:
-        tk.Label(frame, text=label_text).grid(row=row, column=0, sticky=tk.W, pady=4)
-        ent = tk.Entry(frame, width=50, show="*")
+        tk_mod.Label(frame, text=label_text).grid(row=row, column=0, sticky=tk_mod.W, pady=4)
+        ent = tk_mod.Entry(frame, width=50, show="*")
         ent.grid(row=row, column=1, pady=4)
         if var in prefill:
             ent.insert(0, prefill[var])
         entries[var] = ent
         row += 1
 
-    chk = tk.Checkbutton(frame, text="Show values", variable=show_var, command=toggle_show)
-    chk.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
+    chk = tk_mod.Checkbutton(frame, text="Show values", variable=show_var, command=toggle_show)
+    chk.grid(row=row, column=0, columnspan=2, sticky=tk_mod.W, pady=(6, 0))
     row += 1
 
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
 
     def on_set() -> None:
-        for var in entries:
-            value = entries[var].get()
+        for var, ent in entries.items():
+            value = ent.get()
             result[var] = value
         root.destroy()
 
@@ -179,25 +207,32 @@ def _open_gui_and_collect() -> Optional[Dict[str, str]]:
         root.destroy()
         result.clear()
 
-    btn_frame = tk.Frame(frame)
+    btn_frame = tk_mod.Frame(frame)
     btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
-    tk.Button(btn_frame, text="Set", command=on_set).pack(side=tk.LEFT, padx=(0, 6))
-    tk.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT)
+    tk_mod.Button(btn_frame, text="Set", command=on_set).pack(side=tk_mod.LEFT, padx=(0, 6))
+    tk_mod.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk_mod.LEFT)
 
-    # Center window on screen
-    root.update_idletasks()
-    w = root.winfo_width()
-    h = root.winfo_height()
-    ws = root.winfo_screenwidth()
-    hs = root.winfo_screenheight()
-    x = (ws // 2) - (w // 2)
-    y = (hs // 2) - (h // 2)
+    return root, entries, show_var, result
+
+
+def _run_gui_loop(root, entries, show_var, result) -> dict[str, str] | None:
+    """Center the window, run the Tk mainloop, and return collected results or None."""
     try:
-        root.geometry(f'+{x}+{y}')
-    except Exception:
-        pass
+        root.update_idletasks()
+        w = root.winfo_width()
+        h = root.winfo_height()
+        ws = root.winfo_screenwidth()
+        hs = root.winfo_screenheight()
+        x = (ws // 2) - (w // 2)
+        y = (hs // 2) - (h // 2)
+        try:
+            root.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
 
-    root.mainloop()
+        root.mainloop()
+    except Exception:
+        return None
     return result if result else None
 
 
