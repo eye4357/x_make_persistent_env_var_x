@@ -4,6 +4,32 @@ import os
 import subprocess
 import sys
 
+# Local no-op logging shim (logging removed)
+class _NoopLogger:
+    def debug(self, *a, **k):
+        return None
+
+    def info(self, *a, **k):
+        return None
+
+    def warning(self, *a, **k):
+        return None
+
+    def error(self, *a, **k):
+        return None
+
+    def exception(self, *a, **k):
+        return None
+
+
+_SILENT_LOGGER = _NoopLogger()
+
+
+def setup_basic_logger(name: str = "x_make", *, file_path: str | None = None):
+    return _SILENT_LOGGER
+
+logger = setup_basic_logger("x_make_persistent_env_var")
+
 # Hardcoded token keys we manage via the GUI
 _TOKENS: list[tuple[str, str]] = [
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
@@ -27,11 +53,7 @@ class x_cls_make_persistent_env_var_x:
     ) -> None:
         """Create a helper instance.
 
-        Args:
-            var: optional variable name for set/get operations on this instance.
-            value: optional value used when setting.
-            quiet: suppress printed output for instance methods.
-            tokens: optional list of (VAR, LABEL) pairs this helper should manage; defaults to module `_TOKENS`.
+        tokens defaults to the module-level `_TOKENS` if not provided.
         """
         self.var = var
         self.value = value
@@ -62,42 +84,44 @@ class x_cls_make_persistent_env_var_x:
         )
 
     def persist_current(self) -> int:
-        """Persist any of the configured token vars present in the current process env into the Windows User environment.
+        """Persist configured tokens from current env into Windows User env.
 
-        Returns exit code 0 on success (any persisted), 2 if nothing persisted.
+        Returns 0 on success (any persisted), 2 if none persisted.
         """
         any_changed = False
         for var, _label in self.tokens:
             val = os.environ.get(var)
             if not val:
                 if not self.quiet:
-                    print(f"{var}: not present in current shell; skipping")
+                    logger.info("%s: not present in current shell; skipping", var)
                 continue
             setter = x_cls_make_persistent_env_var_x(var, val, quiet=self.quiet, tokens=self.tokens)
             ok = setter.set_user_env()
             if ok:
                 any_changed = True
                 if not self.quiet:
-                    print(f"{var}: persisted to User environment (will appear in new shells)")
+                    logger.info(
+                        "%s: persisted to User environment (will appear in new shells)", var
+                    )
             elif not self.quiet:
-                print(f"{var}: failed to persist to User environment")
+                logger.error("%s: failed to persist to User environment", var)
         if any_changed:
             if not self.quiet:
-                print(
+                logger.info(
                     "Done. Open a NEW PowerShell window for changes to take effect in new shells."
                 )
             return 0
         else:
             if not self.quiet:
-                print("No variables were persisted.")
+                logger.info("No variables were persisted.")
             return 2
 
     def run_gui(self) -> int:
-        """Run the GUI interactive flow. Returns exit code (0 success, 1 partial failure, 2 cancelled/error)."""
+        """Run the GUI interactive flow. Return codes: 0 ok, 1 partial, 2 cancelled/error."""
         vals = _open_gui_and_collect()
         if vals is None:
             if not self.quiet:
-                print("GUI unavailable or cancelled; aborting.")
+                logger.info("GUI unavailable or cancelled; aborting.")
             return 2
 
         # summaries: list of (var, ok, stored_value) where stored_value may be None
@@ -117,22 +141,20 @@ class x_cls_make_persistent_env_var_x:
                 ok_all = False
 
         if not self.quiet:
-            print("Results:")
+            logger.info("Results:")
             for var, ok, stored in summaries:
                 if stored is None or stored in {"<empty>", ""}:
                     shown = "<not set>"
                 else:
                     shown = "<hidden>"
-                print(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
+                logger.info("- %s: set=%s | stored=%s", var, "yes" if ok else "no", shown)
 
         if not ok_all:
             if not self.quiet:
-                print("Some values were not set correctly.")
+                logger.info("Some values were not set correctly.")
             return 1
         if not self.quiet:
-            print(
-                "All values set. Open a NEW PowerShell window for changes to take effect in new shells."
-            )
+            logger.info("All values set. Open a NEW PowerShell window for changes to take effect.")
         return 0
 
 
