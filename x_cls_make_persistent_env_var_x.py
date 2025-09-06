@@ -3,32 +3,37 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from typing import Any
+
 
 # Local no-op logging shim (logging removed)
 class _NoopLogger:
-    def debug(self, *a, **k):
+    def debug(self, *a: object, **k: object) -> None:
         return None
 
-    def info(self, *a, **k):
+    def info(self, *a: object, **k: object) -> None:
         return None
 
-    def warning(self, *a, **k):
+    def warning(self, *a: object, **k: object) -> None:
         return None
 
-    def error(self, *a, **k):
+    def error(self, *a: object, **k: object) -> None:
         return None
 
-    def exception(self, *a, **k):
+    def exception(self, *a: object, **k: object) -> None:
         return None
 
 
 _SILENT_LOGGER = _NoopLogger()
 
 
-def setup_basic_logger(name: str = "x_make", *, file_path: str | None = None):
+def setup_basic_logger(
+    name: str = "x_make", *, file_path: str | None = None
+) -> _NoopLogger:
     return _SILENT_LOGGER
 
-logger = setup_basic_logger("x_make_persistent_env_var")
+
+logger: _NoopLogger = setup_basic_logger("x_make_persistent_env_var")
 
 # Hardcoded token keys we manage via the GUI
 _TOKENS: list[tuple[str, str]] = [
@@ -93,15 +98,20 @@ class x_cls_make_persistent_env_var_x:
             val = os.environ.get(var)
             if not val:
                 if not self.quiet:
-                    logger.info("%s: not present in current shell; skipping", var)
+                    logger.info(
+                        "%s: not present in current shell; skipping", var
+                    )
                 continue
-            setter = x_cls_make_persistent_env_var_x(var, val, quiet=self.quiet, tokens=self.tokens)
+            setter = x_cls_make_persistent_env_var_x(
+                var, val, quiet=self.quiet, tokens=self.tokens
+            )
             ok = setter.set_user_env()
             if ok:
                 any_changed = True
                 if not self.quiet:
                     logger.info(
-                        "%s: persisted to User environment (will appear in new shells)", var
+                        "%s: persisted to User environment (will appear in new shells)",
+                        var,
                     )
             elif not self.quiet:
                 logger.error("%s: failed to persist to User environment", var)
@@ -133,7 +143,9 @@ class x_cls_make_persistent_env_var_x:
                 summaries.append((var, False, "<empty>"))
                 ok_all = False
                 continue
-            obj = x_cls_make_persistent_env_var_x(var, val, quiet=self.quiet, tokens=self.tokens)
+            obj = x_cls_make_persistent_env_var_x(
+                var, val, quiet=self.quiet, tokens=self.tokens
+            )
             ok = obj.set_user_env()
             stored = obj.get_user_env()
             summaries.append((var, ok, stored))
@@ -147,14 +159,21 @@ class x_cls_make_persistent_env_var_x:
                     shown = "<not set>"
                 else:
                     shown = "<hidden>"
-                logger.info("- %s: set=%s | stored=%s", var, "yes" if ok else "no", shown)
+                logger.info(
+                    "- %s: set=%s | stored=%s",
+                    var,
+                    "yes" if ok else "no",
+                    shown,
+                )
 
         if not ok_all:
             if not self.quiet:
                 logger.info("Some values were not set correctly.")
             return 1
         if not self.quiet:
-            logger.info("All values set. Open a NEW PowerShell window for changes to take effect.")
+            logger.info(
+                "All values set. Open a NEW PowerShell window for changes to take effect."
+            )
         return 0
 
 
@@ -183,7 +202,9 @@ def _collect_prefill() -> dict[str, str]:
     return prefill
 
 
-def _build_gui_parts(tk_mod, prefill: dict[str, str]):
+def _build_gui_parts(
+    tk_mod: Any, prefill: dict[str, str]
+) -> tuple[Any, dict[str, Any], Any, dict[str, str]]:
     """Build widgets and layout; return (root, entries, show_var, result).
 
     Splitting widget construction into a helper reduces the statement count in the top-level
@@ -205,7 +226,9 @@ def _build_gui_parts(tk_mod, prefill: dict[str, str]):
 
     row = 0
     for var, label_text in _TOKENS:
-        tk_mod.Label(frame, text=label_text).grid(row=row, column=0, sticky=tk_mod.W, pady=4)
+        tk_mod.Label(frame, text=label_text).grid(
+            row=row, column=0, sticky=tk_mod.W, pady=4
+        )
         ent = tk_mod.Entry(frame, width=50, show="*")
         ent.grid(row=row, column=1, pady=4)
         if var in prefill:
@@ -213,7 +236,9 @@ def _build_gui_parts(tk_mod, prefill: dict[str, str]):
         entries[var] = ent
         row += 1
 
-    chk = tk_mod.Checkbutton(frame, text="Show values", variable=show_var, command=toggle_show)
+    chk = tk_mod.Checkbutton(
+        frame, text="Show values", variable=show_var, command=toggle_show
+    )
     chk.grid(row=row, column=0, columnspan=2, sticky=tk_mod.W, pady=(6, 0))
     row += 1
 
@@ -231,13 +256,19 @@ def _build_gui_parts(tk_mod, prefill: dict[str, str]):
 
     btn_frame = tk_mod.Frame(frame)
     btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
-    tk_mod.Button(btn_frame, text="Set", command=on_set).pack(side=tk_mod.LEFT, padx=(0, 6))
-    tk_mod.Button(btn_frame, text="Cancel", command=on_cancel).pack(side=tk_mod.LEFT)
+    tk_mod.Button(btn_frame, text="Set", command=on_set).pack(
+        side=tk_mod.LEFT, padx=(0, 6)
+    )
+    tk_mod.Button(btn_frame, text="Cancel", command=on_cancel).pack(
+        side=tk_mod.LEFT
+    )
 
     return root, entries, show_var, result
 
 
-def _run_gui_loop(root, entries, show_var, result) -> dict[str, str] | None:
+def _run_gui_loop(
+    root: Any, entries: dict[str, Any], show_var: Any, result: dict[str, str]
+) -> dict[str, str] | None:
     """Center the window, run the Tk mainloop, and return collected results or None."""
     try:
         root.update_idletasks()
