@@ -6,9 +6,6 @@ import sys
 from typing import Any
 
 
-import sys
-
-
 def _info(*args: object) -> None:
     try:
         print(" ".join(str(a) for a in args), file=sys.stdout)
@@ -21,6 +18,7 @@ def _error(*args: object) -> None:
         print(" ".join(str(a) for a in args), file=sys.stderr)
     except Exception:
         pass
+
 
 # Hardcoded token keys we manage via the GUI
 _TOKENS: list[tuple[str, str]] = [
