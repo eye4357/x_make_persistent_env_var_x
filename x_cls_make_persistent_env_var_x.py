@@ -6,34 +6,21 @@ import sys
 from typing import Any
 
 
-# Local no-op logging shim (logging removed)
-class _NoopLogger:
-    def debug(self, *a: object, **k: object) -> None:
-        return None
-
-    def info(self, *a: object, **k: object) -> None:
-        return None
-
-    def warning(self, *a: object, **k: object) -> None:
-        return None
-
-    def error(self, *a: object, **k: object) -> None:
-        return None
-
-    def exception(self, *a: object, **k: object) -> None:
-        return None
+import sys
 
 
-_SILENT_LOGGER = _NoopLogger()
+def _info(*args: object) -> None:
+    try:
+        print(" ".join(str(a) for a in args), file=sys.stdout)
+    except Exception:
+        pass
 
 
-def setup_basic_logger(
-    name: str = "x_make", *, file_path: str | None = None
-) -> _NoopLogger:
-    return _SILENT_LOGGER
-
-
-logger: _NoopLogger = setup_basic_logger("x_make_persistent_env_var")
+def _error(*args: object) -> None:
+    try:
+        print(" ".join(str(a) for a in args), file=sys.stderr)
+    except Exception:
+        pass
 
 # Hardcoded token keys we manage via the GUI
 _TOKENS: list[tuple[str, str]] = [
@@ -98,9 +85,7 @@ class x_cls_make_persistent_env_var_x:
             val = os.environ.get(var)
             if not val:
                 if not self.quiet:
-                    logger.info(
-                        "%s: not present in current shell; skipping", var
-                    )
+                    _info(f"{var}: not present in current shell; skipping")
                 continue
             setter = x_cls_make_persistent_env_var_x(
                 var, val, quiet=self.quiet, tokens=self.tokens
@@ -109,21 +94,20 @@ class x_cls_make_persistent_env_var_x:
             if ok:
                 any_changed = True
                 if not self.quiet:
-                    logger.info(
-                        "%s: persisted to User environment (will appear in new shells)",
-                        var,
+                    _info(
+                        f"{var}: persisted to User environment (will appear in new shells)"
                     )
             elif not self.quiet:
-                logger.error("%s: failed to persist to User environment", var)
+                _error(f"{var}: failed to persist to User environment")
         if any_changed:
             if not self.quiet:
-                logger.info(
+                _info(
                     "Done. Open a NEW PowerShell window for changes to take effect in new shells."
                 )
             return 0
         else:
             if not self.quiet:
-                logger.info("No variables were persisted.")
+                _info("No variables were persisted.")
             return 2
 
     def run_gui(self) -> int:
@@ -131,7 +115,7 @@ class x_cls_make_persistent_env_var_x:
         vals = _open_gui_and_collect()
         if vals is None:
             if not self.quiet:
-                logger.info("GUI unavailable or cancelled; aborting.")
+                _info("GUI unavailable or cancelled; aborting.")
             return 2
 
         # summaries: list of (var, ok, stored_value) where stored_value may be None
@@ -153,25 +137,20 @@ class x_cls_make_persistent_env_var_x:
                 ok_all = False
 
         if not self.quiet:
-            logger.info("Results:")
+            _info("Results:")
             for var, ok, stored in summaries:
                 if stored is None or stored in {"<empty>", ""}:
                     shown = "<not set>"
                 else:
                     shown = "<hidden>"
-                logger.info(
-                    "- %s: set=%s | stored=%s",
-                    var,
-                    "yes" if ok else "no",
-                    shown,
-                )
+                _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
         if not ok_all:
             if not self.quiet:
-                logger.info("Some values were not set correctly.")
+                _info("Some values were not set correctly.")
             return 1
         if not self.quiet:
-            logger.info(
+            _info(
                 "All values set. Open a NEW PowerShell window for changes to take effect."
             )
         return 0
@@ -205,11 +184,7 @@ def _collect_prefill() -> dict[str, str]:
 def _build_gui_parts(
     tk_mod: Any, prefill: dict[str, str]
 ) -> tuple[Any, dict[str, Any], Any, dict[str, str]]:
-    """Build widgets and layout; return (root, entries, show_var, result).
-
-    Splitting widget construction into a helper reduces the statement count in the top-level
-    orchestration function so linters like ruff don't flag PLR limits.
-    """
+    """Build widgets and layout; return (root, entries, show_var, result)."""
     root = tk_mod.Tk()
     root.title("Set persistent tokens")
     entries: dict[str, tk_mod.Entry] = {}
