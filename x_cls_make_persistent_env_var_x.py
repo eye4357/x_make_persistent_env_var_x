@@ -40,6 +40,7 @@ class x_cls_make_persistent_env_var_x:
         value: str = "",
         quiet: bool = False,
         tokens: list[tuple[str, str]] | None = None,
+        ctx: object | None = None,
     ) -> None:
         """Create a helper instance.
 
@@ -50,6 +51,7 @@ class x_cls_make_persistent_env_var_x:
         self.quiet = quiet
         # tokens the instance manages
         self.tokens = tokens if tokens is not None else _TOKENS
+        self._ctx = ctx
 
     def set_user_env(self) -> bool:
         cmd = f'[Environment]::SetEnvironmentVariable("{self.var}", "{self.value}", "User")'
@@ -80,33 +82,44 @@ class x_cls_make_persistent_env_var_x:
         """
         any_changed = False
         for var, _label in self.tokens:
-            val = os.environ.get(var)
-            if not val:
-                if not self.quiet:
-                    _info(f"{var}: not present in current shell; skipping")
-                continue
-            setter = x_cls_make_persistent_env_var_x(
-                var, val, quiet=self.quiet, tokens=self.tokens
-            )
-            ok = setter.set_user_env()
-            if ok:
+            if self._persist_one(var):
                 any_changed = True
-                if not self.quiet:
-                    _info(
-                        f"{var}: persisted to User environment (will appear in new shells)"
-                    )
-            elif not self.quiet:
-                _error(f"{var}: failed to persist to User environment")
+
         if any_changed:
             if not self.quiet:
-                _info(
-                    "Done. Open a NEW PowerShell window for changes to take effect in new shells."
-                )
+                if getattr(self._ctx, "verbose", False):
+                    _info(
+                        "Done. Open a NEW PowerShell window for changes to take effect in new shells."
+                    )
             return 0
         else:
             if not self.quiet:
-                _info("No variables were persisted.")
+                if getattr(self._ctx, "verbose", False):
+                    _info("No variables were persisted.")
             return 2
+
+    def _persist_one(self, var: str) -> bool:
+        """Persist a single variable; return True if stored successfully."""
+        val = os.environ.get(var)
+        if not val:
+            if not self.quiet:
+                if getattr(self._ctx, "verbose", False):
+                    _info(f"{var}: not present in current shell; skipping")
+            return False
+        setter = x_cls_make_persistent_env_var_x(
+            var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
+        )
+        ok = setter.set_user_env()
+        if ok:
+            if not self.quiet and getattr(self._ctx, "verbose", False):
+                _info(
+                    f"{var}: persisted to User environment (will appear in new shells)"
+                )
+            return True
+        # Failure path
+        if not self.quiet and getattr(self._ctx, "verbose", False):
+            _error(f"{var}: failed to persist to User environment")
+        return False
 
     def run_gui(self) -> int:
         """Run the GUI interactive flow. Return codes: 0 ok, 1 partial, 2 cancelled/error."""
@@ -126,7 +139,7 @@ class x_cls_make_persistent_env_var_x:
                 ok_all = False
                 continue
             obj = x_cls_make_persistent_env_var_x(
-                var, val, quiet=self.quiet, tokens=self.tokens
+                var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
             )
             ok = obj.set_user_env()
             stored = obj.get_user_env()
