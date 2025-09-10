@@ -4,7 +4,43 @@ import os
 import subprocess
 import sys
 from typing import Any
-from x_make_common_x.helpers import info as _info, error as _error
+import logging
+import sys as _sys
+
+_LOGGER = logging.getLogger("x_make")
+
+
+def _info(*args: object) -> None:
+    msg = " ".join(str(a) for a in args)
+    try:
+        _LOGGER.info("%s", msg)
+    except Exception:
+        pass
+    try:
+        print(msg)
+    except Exception:
+        try:
+            _sys.stdout.write(msg + "\n")
+        except Exception:
+            pass
+
+
+def _error(*args: object) -> None:
+    msg = " ".join(str(a) for a in args)
+    try:
+        _LOGGER.error("%s", msg)
+    except Exception:
+        pass
+    try:
+        print(msg, file=_sys.stderr)
+    except Exception:
+        try:
+            _sys.stderr.write(msg + "\n")
+        except Exception:
+            try:
+                print(msg)
+            except Exception:
+                pass
 
 
 # Hardcoded token keys we manage via the GUI
