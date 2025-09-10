@@ -4,20 +4,7 @@ import os
 import subprocess
 import sys
 from typing import Any
-
-
-def _info(*args: object) -> None:
-    try:
-        print(" ".join(str(a) for a in args), file=sys.stdout)
-    except Exception:
-        pass
-
-
-def _error(*args: object) -> None:
-    try:
-        print(" ".join(str(a) for a in args), file=sys.stderr)
-    except Exception:
-        pass
+from x_make_common_x.helpers import info as _info, error as _error
 
 
 # Hardcoded token keys we manage via the GUI
