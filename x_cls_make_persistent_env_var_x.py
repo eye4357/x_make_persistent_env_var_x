@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
-from typing import Any
-import logging
 import sys as _sys
+from typing import Any
 
 _LOGGER = logging.getLogger("x_make")
 
@@ -115,11 +115,10 @@ class x_cls_make_persistent_env_var_x:
                         "Done. Open a NEW PowerShell window for changes to take effect in new shells."
                     )
             return 0
-        else:
-            if not self.quiet:
-                if getattr(self._ctx, "verbose", False):
-                    _info("No variables were persisted.")
-            return 2
+        if not self.quiet:
+            if getattr(self._ctx, "verbose", False):
+                _info("No variables were persisted.")
+        return 2
 
     def _persist_one(self, var: str) -> bool:
         """Persist a single variable; return True if stored successfully."""
