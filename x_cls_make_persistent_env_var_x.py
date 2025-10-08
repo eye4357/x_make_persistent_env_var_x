@@ -2,48 +2,93 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import sys as _sys
-from typing import Any
+from collections.abc import Callable  # noqa: TC003
+from contextlib import suppress
+from types import ModuleType  # noqa: TC003
+from typing import TYPE_CHECKING, TypeVar, cast
+
+if TYPE_CHECKING:
+    import tkinter as tk
+
+    TkRoot = tk.Tk
+    TkEntry = tk.Entry
+    TkBooleanVar = tk.BooleanVar
+    TkFrame = tk.Frame
+    TkLabel = tk.Label
+    TkButton = tk.Button
+    TkCheckbutton = tk.Checkbutton
+else:  # pragma: no cover - runtime fallback when tkinter unavailable
+    _tk_fallback = object
+    TkRoot = _tk_fallback
+    TkEntry = _tk_fallback
+    TkBooleanVar = _tk_fallback
+    TkFrame = _tk_fallback
+    TkLabel = _tk_fallback
+    TkButton = _tk_fallback
+    TkCheckbutton = _tk_fallback
 
 _LOGGER = logging.getLogger("x_make")
+
+_tk_runtime: ModuleType | None
+try:
+    import tkinter as tk
+except (ImportError, OSError, RuntimeError):
+    _tk_runtime = None
+else:
+    _tk_runtime = tk
+
+T = TypeVar("T")
+
+
+def _try_emit(*emitters: Callable[[], None]) -> None:
+    for emit in emitters:
+        if _safe_call(emit):
+            break
+
+
+def _safe_call(action: Callable[[], T]) -> bool:
+    try:
+        action()
+    except Exception:  # noqa: BLE001
+        return False
+    return True
 
 
 def _info(*args: object) -> None:
     msg = " ".join(str(a) for a in args)
-    try:
+    with suppress(Exception):
         _LOGGER.info("%s", msg)
-    except Exception:
-        pass
-    try:
+
+    def _print() -> None:
         print(msg)
-    except Exception:
-        try:
-            _sys.stdout.write(msg + "\n")
-        except Exception:
-            pass
+
+    def _write_stdout() -> None:
+        _sys.stdout.write(f"{msg}\n")
+
+    _try_emit(_print, _write_stdout)
 
 
 def _error(*args: object) -> None:
     msg = " ".join(str(a) for a in args)
-    try:
+    with suppress(Exception):
         _LOGGER.error("%s", msg)
-    except Exception:
-        pass
-    try:
+
+    def _print_stderr() -> None:
         print(msg, file=_sys.stderr)
-    except Exception:
-        try:
-            _sys.stderr.write(msg + "\n")
-        except Exception:
-            try:
-                print(msg)
-            except Exception:
-                pass
+
+    def _write_stderr() -> None:
+        _sys.stderr.write(f"{msg}\n")
+
+    def _print_fallback() -> None:
+        print(msg)
+
+    _try_emit(_print_stderr, _write_stderr, _print_fallback)
 
 
-# Hardcoded token keys we manage via the GUI
 _TOKENS: list[tuple[str, str]] = [
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
     ("PYPI_API_TOKEN", "PyPI API Token"),
@@ -51,38 +96,40 @@ _TOKENS: list[tuple[str, str]] = [
 ]
 
 
-class x_cls_make_persistent_env_var_x:
-    """Persistent environment variable setter (Windows user scope).
-
-    Provides set/get helpers used by the GUI-only main program.
-    """
+class x_cls_make_persistent_env_var_x:  # noqa: N801
+    """Persistent environment variable setter (Windows user scope)."""
 
     def __init__(
         self,
         var: str = "",
         value: str = "",
+        *,
         quiet: bool = False,
         tokens: list[tuple[str, str]] | None = None,
         ctx: object | None = None,
     ) -> None:
-        """Create a helper instance.
-
-        tokens defaults to the module-level `_TOKENS` if not provided.
-        """
         self.var = var
         self.value = value
         self.quiet = quiet
-        # tokens the instance manages
         self.tokens = tokens if tokens is not None else _TOKENS
         self._ctx = ctx
 
+    def _is_verbose(self) -> bool:
+        attr: object = getattr(self._ctx, "verbose", False)
+        if isinstance(attr, bool):
+            return attr
+        return bool(attr)
+
     def set_user_env(self) -> bool:
-        cmd = f'[Environment]::SetEnvironmentVariable("{self.var}", "{self.value}", "User")'
+        cmd = (
+            "[Environment]::SetEnvironmentVariable("
+            f'"{self.var}", "{self.value}", "User")'
+        )
         result = self.run_powershell(cmd)
         return result.returncode == 0
 
     def get_user_env(self) -> str | None:
-        cmd = f'[Environment]::GetEnvironmentVariable("{self.var}", "User")'
+        cmd = "[Environment]::GetEnvironmentVariable(" f'"{self.var}", "User")'
         result = self.run_powershell(cmd)
         if result.returncode != 0:
             return None
@@ -91,71 +138,58 @@ class x_cls_make_persistent_env_var_x:
 
     @staticmethod
     def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["powershell", "-Command", command],
+        powershell = shutil.which("powershell") or "powershell"
+        return subprocess.run(  # noqa: S603
+            [powershell, "-Command", command],
             check=False,
             capture_output=True,
             text=True,
         )
 
     def persist_current(self) -> int:
-        """Persist configured tokens from current env into Windows User env.
-
-        Returns 0 on success (any persisted), 2 if none persisted.
-        """
         any_changed = False
         for var, _label in self.tokens:
             if self._persist_one(var):
                 any_changed = True
 
         if any_changed:
-            if not self.quiet:
-                if getattr(self._ctx, "verbose", False):
-                    _info(
-                        "Done. Open a NEW PowerShell window for changes to take effect in new shells."
-                    )
+            if not self.quiet and self._is_verbose():
+                _info(
+                    "Done. Open a NEW PowerShell window for changes to take effect in "
+                    "new shells."
+                )
             return 0
-        if not self.quiet:
-            if getattr(self._ctx, "verbose", False):
-                _info("No variables were persisted.")
+        if not self.quiet and self._is_verbose():
+            _info("No variables were persisted.")
         return 2
 
     def _persist_one(self, var: str) -> bool:
-        """Persist a single variable; return True if stored successfully."""
         val = os.environ.get(var)
         if not val:
-            if not self.quiet:
-                if getattr(self._ctx, "verbose", False):
-                    _info(f"{var}: not present in current shell; skipping")
+            if not self.quiet and self._is_verbose():
+                _info(f"{var}: not present in current shell; skipping")
             return False
         setter = x_cls_make_persistent_env_var_x(
             var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
         )
         ok = setter.set_user_env()
         if ok:
-            if not self.quiet and getattr(self._ctx, "verbose", False):
+            if not self.quiet and self._is_verbose():
                 _info(
                     f"{var}: persisted to User environment (will appear in new shells)"
                 )
             return True
-        # Failure path
-        if not self.quiet and getattr(self._ctx, "verbose", False):
+        if not self.quiet and self._is_verbose():
             _error(f"{var}: failed to persist to User environment")
         return False
 
-    def run_gui(self) -> int:
-        """Run the GUI interactive flow. Return codes: 0 ok, 1 partial, 2 cancelled/error."""
-        vals = _open_gui_and_collect()
-        if vals is None:
-            if not self.quiet:
-                _info("GUI unavailable or cancelled; aborting.")
-            return 2
-
-        # summaries: list of (var, ok, stored_value) where stored_value may be None
+    def _apply_gui_values(
+        self, values: dict[str, str]
+    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
         summaries: list[tuple[str, bool, str | None]] = []
         ok_all = True
         for var, _label in self.tokens:
-            val = vals.get(var, "")
+            val = values.get(var, "")
             if not val:
                 summaries.append((var, False, "<empty>"))
                 ok_all = False
@@ -168,14 +202,21 @@ class x_cls_make_persistent_env_var_x:
             summaries.append((var, ok, stored))
             if not (ok and stored == val):
                 ok_all = False
+        return summaries, ok_all
+
+    def run_gui(self) -> int:
+        vals = _open_gui_and_collect()
+        if vals is None:
+            if not self.quiet:
+                _info("GUI unavailable or cancelled; aborting.")
+            return 2
+
+        summaries, ok_all = self._apply_gui_values(vals)
 
         if not self.quiet:
             _info("Results:")
             for var, ok, stored in summaries:
-                if stored is None or stored in {"<empty>", ""}:
-                    shown = "<not set>"
-                else:
-                    shown = "<hidden>"
+                shown = "<not set>" if stored in {None, "", "<empty>"} else "<hidden>"
                 _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
         if not ok_all:
@@ -184,28 +225,22 @@ class x_cls_make_persistent_env_var_x:
             return 1
         if not self.quiet:
             _info(
-                "All values set. Open a NEW PowerShell window for changes to take effect."
+                "All values set. Open a NEW PowerShell window for changes to take "
+                "effect."
             )
         return 0
 
 
 def _open_gui_and_collect() -> dict[str, str] | None:
-    """Open a small Tkinter window to collect the hardcoded token values.
-
-    Returns a dict mapping var -> value or None if GUI unavailable / cancelled.
-    """
-    try:
-        import tkinter as _tk
-    except Exception:
+    if _tk_runtime is None:
         return None
 
     prefill = _collect_prefill()
-    root, entries, show_var, result = _build_gui_parts(_tk, prefill)
-    return _run_gui_loop(root, entries, show_var, result)
+    root, _entries, _show_var, result = _build_gui_parts(_tk_runtime, prefill)
+    return _run_gui_loop(root, result)
 
 
 def _collect_prefill() -> dict[str, str]:
-    """Collect existing user-scope values for the managed tokens."""
     prefill: dict[str, str] = {}
     for var, _label in _TOKENS:
         cur = x_cls_make_persistent_env_var_x(var).get_user_env()
@@ -215,90 +250,80 @@ def _collect_prefill() -> dict[str, str]:
 
 
 def _build_gui_parts(
-    tk_mod: Any, prefill: dict[str, str]
-) -> tuple[Any, dict[str, Any], Any, dict[str, str]]:
-    """Build widgets and layout; return (root, entries, show_var, result)."""
-    root = tk_mod.Tk()
+    tk_mod: ModuleType, prefill: dict[str, str]
+) -> tuple[TkRoot, dict[str, TkEntry], TkBooleanVar, dict[str, str]]:
+    root = cast("TkRoot", tk_mod.Tk())
     root.title("Set persistent tokens")
-    entries: dict[str, tk_mod.Entry] = {}
 
-    frame = tk_mod.Frame(root, padx=10, pady=10)
-    frame.pack(fill=tk_mod.BOTH, expand=True)
+    frame = cast("TkFrame", tk_mod.Frame(root, padx=10, pady=10))
+    frame.pack(fill="both", expand=True)
 
-    show_var = tk_mod.BooleanVar(value=False)
+    show_var = cast("TkBooleanVar", tk_mod.BooleanVar(value=False))
+    entries: dict[str, TkEntry] = {}
 
     def toggle_show() -> None:
-        ch = "" if show_var.get() else "*"
+        ch = "" if bool(show_var.get()) else "*"
         for ent in entries.values():
             ent.config(show=ch)
 
     row = 0
     for var, label_text in _TOKENS:
-        tk_mod.Label(frame, text=label_text).grid(
-            row=row, column=0, sticky=tk_mod.W, pady=4
-        )
-        ent = tk_mod.Entry(frame, width=50, show="*")
-        ent.grid(row=row, column=1, pady=4)
+        label = cast("TkLabel", tk_mod.Label(frame, text=label_text))
+        label.grid(row=row, column=0, sticky="w", pady=4)
+        ent = cast("TkEntry", tk_mod.Entry(frame, width=50, show="*"))
         if var in prefill:
             ent.insert(0, prefill[var])
         entries[var] = ent
         row += 1
 
-    chk = tk_mod.Checkbutton(
-        frame, text="Show values", variable=show_var, command=toggle_show
+    chk = cast(
+        "TkCheckbutton",
+        tk_mod.Checkbutton(
+            frame, text="Show values", variable=show_var, command=toggle_show
+        ),
     )
-    chk.grid(row=row, column=0, columnspan=2, sticky=tk_mod.W, pady=(6, 0))
+    chk.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
     row += 1
 
     result: dict[str, str] = {}
 
     def on_set() -> None:
         for var, ent in entries.items():
-            value = ent.get()
-            result[var] = value
+            result[var] = ent.get()
         root.destroy()
 
     def on_cancel() -> None:
         root.destroy()
         result.clear()
 
-    btn_frame = tk_mod.Frame(frame)
+    btn_frame = cast("TkFrame", tk_mod.Frame(frame))
     btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
-    tk_mod.Button(btn_frame, text="Set", command=on_set).pack(
-        side=tk_mod.LEFT, padx=(0, 6)
+    set_btn = cast("TkButton", tk_mod.Button(btn_frame, text="Set", command=on_set))
+    set_btn.pack(side="left", padx=(0, 6))
+    cancel_btn = cast(
+        "TkButton", tk_mod.Button(btn_frame, text="Cancel", command=on_cancel)
     )
-    tk_mod.Button(btn_frame, text="Cancel", command=on_cancel).pack(
-        side=tk_mod.LEFT
-    )
+    cancel_btn.pack(side="left")
 
     return root, entries, show_var, result
 
 
-def _run_gui_loop(
-    root: Any, entries: dict[str, Any], show_var: Any, result: dict[str, str]
-) -> dict[str, str] | None:
-    """Center the window, run the Tk mainloop, and return collected results or None."""
-    try:
-        root.update_idletasks()
-        w = root.winfo_width()
-        h = root.winfo_height()
-        ws = root.winfo_screenwidth()
-        hs = root.winfo_screenheight()
-        x = (ws // 2) - (w // 2)
-        y = (hs // 2) - (h // 2)
-        try:
-            root.geometry(f"+{x}+{y}")
-        except Exception:
-            pass
-
-        root.mainloop()
-    except Exception:
+def _run_gui_loop(root: TkRoot, result: dict[str, str]) -> dict[str, str] | None:
+    if not _safe_call(root.update_idletasks):
+        return None
+    w = root.winfo_width()
+    h = root.winfo_height()
+    ws = root.winfo_screenwidth()
+    hs = root.winfo_screenheight()
+    x = (ws // 2) - (w // 2)
+    y = (hs // 2) - (h // 2)
+    _safe_call(lambda: root.geometry(f"+{x}+{y}"))
+    if not _safe_call(root.mainloop):
         return None
     return result if result else None
 
 
 if __name__ == "__main__":
-    # Minimal entrypoint: instantiate and run the GUI-only flow.
     inst = x_cls_make_persistent_env_var_x()
     code = inst.run_gui()
     sys.exit(code)
