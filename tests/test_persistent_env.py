@@ -32,8 +32,10 @@ class PersistentEnvTests(unittest.TestCase):
         def should_not_run() -> None:
             calls.append("unreachable")
 
-        safe_call = cast("SafeCall", module._safe_call)
-        try_emit = cast("TryEmit", module._try_emit)
+        safe_call_obj = module.__dict__["_safe_call"]
+        try_emit_obj = module.__dict__["_try_emit"]
+        safe_call = cast("SafeCall", safe_call_obj)
+        try_emit = cast("TryEmit", try_emit_obj)
 
         self.assertFalse(safe_call(raise_error))
         self.assertTrue(safe_call(record_success))
@@ -115,7 +117,8 @@ class PersistentEnvTests(unittest.TestCase):
             "get_user_env",
             new=fake_get,
         ):
-            apply_gui_values = cast("ApplyGuiValues", inst._apply_gui_values)
+            apply_gui_values_obj = inst._apply_gui_values
+            apply_gui_values = cast("ApplyGuiValues", apply_gui_values_obj)
             summaries, ok_all = apply_gui_values(values)
 
         self.assertFalse(ok_all)
