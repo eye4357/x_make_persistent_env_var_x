@@ -6,21 +6,61 @@ import shutil
 import subprocess
 import sys
 import sys as _sys
-from collections.abc import Callable  # noqa: TC003
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from types import ModuleType  # noqa: TC003
+from types import ModuleType
 from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
-    import tkinter as tk
+    from typing import Protocol
 
-    TkRoot = tk.Tk
-    TkEntry = tk.Entry
-    TkBooleanVar = tk.BooleanVar
-    TkFrame = tk.Frame
-    TkLabel = tk.Label
-    TkButton = tk.Button
-    TkCheckbutton = tk.Checkbutton
+    class _TkSupportsGrid(Protocol):
+        def grid(self, *args: object, **kwargs: object) -> None: ...
+
+    class _TkSupportsPack(Protocol):
+        def pack(self, *args: object, **kwargs: object) -> None: ...
+
+    class TkRoot(Protocol):
+        def title(self, text: str) -> None: ...
+
+        def destroy(self) -> None: ...
+
+        def update_idletasks(self) -> None: ...
+
+        def winfo_width(self) -> int: ...
+
+        def winfo_height(self) -> int: ...
+
+        def winfo_screenwidth(self) -> int: ...
+
+        def winfo_screenheight(self) -> int: ...
+
+        def geometry(self, geometry: str) -> None: ...
+
+        def mainloop(self) -> None: ...
+
+    class TkEntry(_TkSupportsGrid, Protocol):
+        def config(self, **kwargs: object) -> None: ...
+
+        def insert(self, index: int, string: str) -> None: ...
+
+        def get(self) -> str: ...
+
+    class TkBooleanVar(Protocol):
+        def get(self) -> bool | int: ...
+
+    class TkFrame(_TkSupportsPack, _TkSupportsGrid, Protocol):
+        pass
+
+    class TkLabel(_TkSupportsGrid, Protocol):
+        pass
+
+    class TkButton(_TkSupportsPack, Protocol):
+        pass
+
+    class TkCheckbutton(_TkSupportsGrid, Protocol):
+        pass
+
 else:  # pragma: no cover - runtime fallback when tkinter unavailable
     _tk_fallback = object
     TkRoot = _tk_fallback
@@ -89,11 +129,14 @@ def _error(*args: object) -> None:
     _try_emit(_print_stderr, _write_stderr, _print_fallback)
 
 
-_TOKENS: list[tuple[str, str]] = [
+Token = tuple[str, str]
+
+
+_DEFAULT_TOKENS: tuple[Token, ...] = (
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
     ("PYPI_API_TOKEN", "PyPI API Token"),
     ("GITHUB_TOKEN", "GitHub Token"),
-]
+)
 
 
 class x_cls_make_persistent_env_var_x:  # noqa: N801
@@ -105,13 +148,15 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         value: str = "",
         *,
         quiet: bool = False,
-        tokens: list[tuple[str, str]] | None = None,
+        tokens: Sequence[Token] | None = None,
         ctx: object | None = None,
     ) -> None:
         self.var = var
         self.value = value
         self.quiet = quiet
-        self.tokens = tokens if tokens is not None else _TOKENS
+        self.tokens: tuple[Token, ...] = (
+            tuple(tokens) if tokens is not None else _DEFAULT_TOKENS
+        )
         self._ctx = ctx
 
     def _is_verbose(self) -> bool:
@@ -119,6 +164,9 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         if isinstance(attr, bool):
             return attr
         return bool(attr)
+
+    def _should_report(self) -> bool:
+        return not self.quiet and self._is_verbose()
 
     def set_user_env(self) -> bool:
         cmd = (
@@ -147,26 +195,23 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         )
 
     def persist_current(self) -> int:
-        any_changed = False
-        for var, _label in self.tokens:
-            if self._persist_one(var):
-                any_changed = True
+        any_changed = any(self._persist_one(var) for var, _label in self.tokens)
 
         if any_changed:
-            if not self.quiet and self._is_verbose():
+            if self._should_report():
                 _info(
                     "Done. Open a NEW PowerShell window for changes to take effect in "
                     "new shells."
                 )
             return 0
-        if not self.quiet and self._is_verbose():
+        if self._should_report():
             _info("No variables were persisted.")
         return 2
 
     def _persist_one(self, var: str) -> bool:
         val = os.environ.get(var)
         if not val:
-            if not self.quiet and self._is_verbose():
+            if self._should_report():
                 _info(f"{var}: not present in current shell; skipping")
             return False
         setter = x_cls_make_persistent_env_var_x(
@@ -174,12 +219,12 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         )
         ok = setter.set_user_env()
         if ok:
-            if not self.quiet and self._is_verbose():
+            if self._should_report():
                 _info(
                     f"{var}: persisted to User environment (will appear in new shells)"
                 )
             return True
-        if not self.quiet and self._is_verbose():
+        if self._should_report():
             _error(f"{var}: failed to persist to User environment")
         return False
 
@@ -205,7 +250,7 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         return summaries, ok_all
 
     def run_gui(self) -> int:
-        vals = _open_gui_and_collect()
+        vals = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
         if vals is None:
             if not self.quiet:
                 _info("GUI unavailable or cancelled; aborting.")
@@ -231,26 +276,34 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         return 0
 
 
-def _open_gui_and_collect() -> dict[str, str] | None:
+def _open_gui_and_collect(
+    tokens: Sequence[Token], *, ctx: object | None, quiet: bool
+) -> dict[str, str] | None:
     if _tk_runtime is None:
         return None
 
-    prefill = _collect_prefill()
-    root, _entries, _show_var, result = _build_gui_parts(_tk_runtime, prefill)
+    prefill = _collect_prefill(tokens, ctx=ctx, quiet=quiet)
+    root, _entries, _show_var, result = _build_gui_parts(_tk_runtime, tokens, prefill)
     return _run_gui_loop(root, result)
 
 
-def _collect_prefill() -> dict[str, str]:
+def _collect_prefill(
+    tokens: Sequence[Token], *, ctx: object | None, quiet: bool
+) -> dict[str, str]:
     prefill: dict[str, str] = {}
-    for var, _label in _TOKENS:
-        cur = x_cls_make_persistent_env_var_x(var).get_user_env()
+    for var, _label in tokens:
+        cur = x_cls_make_persistent_env_var_x(
+            var, quiet=quiet, tokens=tokens, ctx=ctx
+        ).get_user_env()
         if cur:
             prefill[var] = cur
     return prefill
 
 
 def _build_gui_parts(
-    tk_mod: ModuleType, prefill: dict[str, str]
+    tk_mod: ModuleType,
+    tokens: Sequence[Token],
+    prefill: Mapping[str, str],
 ) -> tuple[TkRoot, dict[str, TkEntry], TkBooleanVar, dict[str, str]]:
     root = cast("TkRoot", tk_mod.Tk())
     root.title("Set persistent tokens")
@@ -267,7 +320,7 @@ def _build_gui_parts(
             ent.config(show=ch)
 
     row = 0
-    for var, label_text in _TOKENS:
+    for var, label_text in tokens:
         label = cast("TkLabel", tk_mod.Label(frame, text=label_text))
         label.grid(row=row, column=0, sticky="w", pady=4)
         ent = cast("TkEntry", tk_mod.Entry(frame, width=50, show="*"))
