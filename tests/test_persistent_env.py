@@ -2,145 +2,196 @@ from __future__ import annotations
 
 import os
 import subprocess
-import unittest
-from collections.abc import Callable
-from typing import cast
-from unittest import mock
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from typing import Protocol
 
-import x_cls_make_persistent_env_var_x as module
+from x_make_persistent_env_var_x import x_cls_make_persistent_env_var_x as module
 
 x_cls_make_persistent_env_var_x = module.x_cls_make_persistent_env_var_x
 
-SafeCall = Callable[[Callable[[], object]], bool]
-TryEmit = Callable[..., None]
-ApplyGuiValues = Callable[
-    [dict[str, str]], tuple[list[tuple[str, bool, str | None]], bool]
-]
+
+class TryEmit(Protocol):
+    def __call__(self, *emitters: Callable[[], None]) -> None: ...
 
 
-class PersistentEnvTests(unittest.TestCase):
-    def test_safe_call_and_try_emit(self) -> None:
-        calls: list[str] = []
+class OpenGuiHook(Protocol):
+    def __call__(
+        self,
+        tokens: Sequence[tuple[str, str]],
+        *,
+        ctx: object | None,
+        quiet: bool,
+    ) -> dict[str, str] | None: ...
 
-        def raise_error() -> None:
-            error_message = "boom"
-            raise RuntimeError(error_message)
 
-        def record_success() -> None:
-            calls.append("success")
+class ExpectationFailed(AssertionError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
-        def should_not_run() -> None:
-            calls.append("unreachable")
 
-        safe_call_obj = module.__dict__["_safe_call"]
-        try_emit_obj = module.__dict__["_try_emit"]
-        safe_call = cast("SafeCall", safe_call_obj)
-        try_emit = cast("TryEmit", try_emit_obj)
+class ExpectationMismatch(AssertionError):
+    def __init__(self, label: str, expected: object, actual: object) -> None:
+        super().__init__(f"{label}: expected {expected!r}, got {actual!r}")
 
-        self.assertFalse(safe_call(raise_error))
-        self.assertTrue(safe_call(record_success))
-        self.assertEqual(calls, ["success"])
 
-        calls.clear()
-        try_emit(raise_error, record_success, should_not_run)
-        self.assertEqual(calls, ["success"])
+def expect(condition: object, message: str) -> None:
+    if not bool(condition):
+        raise ExpectationFailed(message)
 
-    def test_persist_current_sets_present_variables(self) -> None:
-        state: dict[str, str] = {}
-        tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
 
-        def fake_run(command: str) -> subprocess.CompletedProcess[str]:
-            parts = command.split('"')
-            if "SetEnvironmentVariable" in command:
-                state[parts[1]] = parts[3]
-                return subprocess.CompletedProcess(
-                    ["powershell", "-Command", command],
-                    returncode=0,
-                    stdout="",
-                    stderr="",
-                )
-            if "GetEnvironmentVariable" in command:
-                value = state.get(parts[1], "")
-                return subprocess.CompletedProcess(
-                    ["powershell", "-Command", command],
-                    returncode=0,
-                    stdout=value,
-                    stderr="",
-                )
-            unexpected_command = f"Unexpected command: {command}"
-            raise AssertionError(unexpected_command)
+def expect_equal(actual: object, expected: object, *, label: str) -> None:
+    if actual != expected:
+        raise ExpectationMismatch(label, expected, actual)
 
-        with mock.patch.object(
-            x_cls_make_persistent_env_var_x,
-            "run_powershell",
-            side_effect=fake_run,
-        ), mock.patch.dict(os.environ, {"FOO": "secret"}, clear=True):
-            inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
-            exit_code = inst.persist_current()
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(state["FOO"], "secret")
+def test_safe_call_and_try_emit() -> None:
+    calls: list[str] = []
 
-    def test_persist_current_skips_missing_variables(self) -> None:
-        tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
+    def raise_error() -> None:
+        error_message = "boom"
+        raise RuntimeError(error_message)
 
-        with mock.patch.object(
-            x_cls_make_persistent_env_var_x,
-            "run_powershell",
-            side_effect=AssertionError,
-        ), mock.patch.dict(os.environ, {}, clear=True):
-            inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
-            exit_code = inst.persist_current()
+    def record_success() -> None:
+        calls.append("success")
 
-        self.assertEqual(exit_code, 2)
+    def should_not_run() -> None:
+        calls.append("unreachable")
 
-    def test_apply_gui_values_reports_results(self) -> None:
-        stored_values: dict[str, str] = {}
-        tokens: list[tuple[str, str]] = [("ALPHA", "Alpha"), ("BETA", "Beta")]
-        inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
+    safe_call = module._safe_call  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    try_emit: TryEmit = module._try_emit  # pyright: ignore[reportPrivateUsage]
 
-        def fake_set(self: x_cls_make_persistent_env_var_x) -> bool:
+    expect(not safe_call(raise_error), "safe_call should return False on exceptions")
+    expect(safe_call(record_success), "safe_call should return True on success")
+    expect_equal(calls, ["success"], label="calls after safe_call")
+
+    calls.clear()
+    try_emit(raise_error, record_success, should_not_run)
+    expect_equal(calls, ["success"], label="calls after try_emit")
+
+
+def test_persist_current_sets_present_variables() -> None:
+    state: dict[str, str] = {}
+    tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
+
+    def fake_run(command: str) -> subprocess.CompletedProcess[str]:
+        parts = command.split('"')
+        if "SetEnvironmentVariable" in command:
+            state[parts[1]] = parts[3]
+            return subprocess.CompletedProcess(
+                ["powershell", "-Command", command],
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+        if "GetEnvironmentVariable" in command:
+            value = state.get(parts[1], "")
+            return subprocess.CompletedProcess(
+                ["powershell", "-Command", command],
+                returncode=0,
+                stdout=value,
+                stderr="",
+            )
+        unexpected_command = f"Unexpected command: {command}"
+        raise AssertionError(unexpected_command)
+
+    class Harness(x_cls_make_persistent_env_var_x):
+        @staticmethod
+        def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+            return fake_run(command)
+
+    with override_environ({"FOO": "secret"}):
+        inst = Harness(tokens=tokens, quiet=True)
+        exit_code = inst.persist_current()
+
+    expect(exit_code == 0, "persist_current should succeed for present variable")
+    expect_equal(state.get("FOO"), "secret", label="persisted FOO value")
+
+
+def test_persist_current_skips_missing_variables() -> None:
+    tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
+
+    class Harness(x_cls_make_persistent_env_var_x):
+        @staticmethod
+        def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+            raise AssertionError(command)
+
+    with override_environ({}):
+        inst = Harness(tokens=tokens, quiet=True)
+        exit_code = inst.persist_current()
+
+    expect(exit_code == 2, "persist_current should return 2 for missing variable")
+
+
+def test_apply_gui_values_reports_results() -> None:
+    stored_values: dict[str, str] = {}
+    tokens: list[tuple[str, str]] = [("ALPHA", "Alpha"), ("BETA", "Beta")]
+
+    class Harness(x_cls_make_persistent_env_var_x):
+        def set_user_env(self) -> bool:
             stored_values[self.var] = self.value
             return True
 
-        def fake_get(self: x_cls_make_persistent_env_var_x) -> str | None:
+        def get_user_env(self) -> str | None:
             return stored_values.get(self.var)
 
-        values: dict[str, str] = {"ALPHA": "top-secret", "BETA": ""}
+    values: dict[str, str] = {"ALPHA": "top-secret", "BETA": ""}
 
-        with mock.patch.object(
-            x_cls_make_persistent_env_var_x,
-            "set_user_env",
-            new=fake_set,
-        ), mock.patch.object(
-            x_cls_make_persistent_env_var_x,
-            "get_user_env",
-            new=fake_get,
-        ):
-            apply_gui_values_obj = inst._apply_gui_values
-            apply_gui_values = cast("ApplyGuiValues", apply_gui_values_obj)
-            summaries, ok_all = apply_gui_values(values)
+    summaries, ok_all = Harness(tokens=tokens, quiet=True).apply_gui_values(values)
 
-        self.assertFalse(ok_all)
-        self.assertEqual(
-            summaries,
-            [("ALPHA", True, "top-secret"), ("BETA", False, "<empty>")],
-        )
-
-    def test_run_gui_uses_instance_tokens(self) -> None:
-        tokens: list[tuple[str, str]] = [("CUSTOM", "Custom")]
-        inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
-
-        with mock.patch.object(
-            module, "_open_gui_and_collect", return_value=None
-        ) as mocked_open:
-            exit_code = inst.run_gui()
-
-        self.assertEqual(exit_code, 2)
-        args, kwargs = mocked_open.call_args
-        self.assertEqual(args[0], tuple(tokens))
-        self.assertEqual(kwargs, {"ctx": None, "quiet": True})
+    expect(not ok_all, "apply_gui_values should report incomplete application")
+    expect_equal(
+        summaries,
+        [("ALPHA", True, "top-secret"), ("BETA", False, "<empty>")],
+        label="apply_gui_values summaries",
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_run_gui_uses_instance_tokens() -> None:
+    tokens: list[tuple[str, str]] = [("CUSTOM", "Custom")]
+    inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
+
+    call_log: list[tuple[tuple[tuple[str, str], ...], dict[str, object]]] = []
+
+    def fake_open_gui(
+        tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
+    ) -> dict[str, str] | None:
+        call_log.append((tuple(tokens), {"ctx": ctx, "quiet": quiet}))
+        return None
+
+    with override_open_gui(fake_open_gui):
+        exit_code = inst.run_gui()
+
+    expect(exit_code == 2, "run_gui should return 2 when GUI is cancelled")
+    expect(call_log, "open_gui should be invoked")
+    recorded_tokens, kwargs = call_log[0]
+    expect_equal(recorded_tokens, tuple(tokens), label="open_gui positional tokens")
+    expect_equal(kwargs, {"ctx": None, "quiet": True}, label="open_gui kwargs")
+
+
+@contextmanager
+def override_environ(values: Mapping[str, str]) -> Iterator[None]:
+    original = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
+@contextmanager
+def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
+    original = module._open_gui_and_collect  # pyright: ignore[reportPrivateUsage]
+
+    def recorder(
+        tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
+    ) -> dict[str, str] | None:
+        return replacer(tokens, ctx=ctx, quiet=quiet)
+
+    module._open_gui_and_collect = recorder  # pyright: ignore[reportPrivateUsage]
+    try:
+        yield
+    finally:
+        module._open_gui_and_collect = original  # pyright: ignore[reportPrivateUsage]

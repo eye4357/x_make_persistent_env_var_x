@@ -214,7 +214,7 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
             if self._should_report():
                 _info(f"{var}: not present in current shell; skipping")
             return False
-        setter = x_cls_make_persistent_env_var_x(
+        setter = type(self)(
             var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
         )
         ok = setter.set_user_env()
@@ -228,8 +228,13 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
             _error(f"{var}: failed to persist to User environment")
         return False
 
+    def apply_gui_values(
+        self, values: Mapping[str, str]
+    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
+        return self._apply_gui_values(values)
+
     def _apply_gui_values(
-        self, values: dict[str, str]
+        self, values: Mapping[str, str]
     ) -> tuple[list[tuple[str, bool, str | None]], bool]:
         summaries: list[tuple[str, bool, str | None]] = []
         ok_all = True
@@ -239,7 +244,7 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
                 summaries.append((var, False, "<empty>"))
                 ok_all = False
                 continue
-            obj = x_cls_make_persistent_env_var_x(
+            obj = type(self)(
                 var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
             )
             ok = obj.set_user_env()
