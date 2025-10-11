@@ -6,12 +6,14 @@ import shutil
 import subprocess
 import sys
 import sys as _sys
-from collections.abc import Callable, Mapping, Sequence
+import types
 from contextlib import suppress
-from types import ModuleType
 from typing import TYPE_CHECKING, TypeVar, cast
 
+ModuleType = types.ModuleType
+
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
     from typing import Protocol
 
     class _TkSupportsGrid(Protocol):
@@ -73,7 +75,7 @@ else:  # pragma: no cover - runtime fallback when tkinter unavailable
 
 _LOGGER = logging.getLogger("x_make")
 
-_tk_runtime: ModuleType | None
+_tk_runtime: types.ModuleType | None
 try:
     import tkinter as tk
 except (ImportError, OSError, RuntimeError):

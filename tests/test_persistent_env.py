@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from x_make_persistent_env_var_x import x_cls_make_persistent_env_var_x as module
 
@@ -25,24 +27,27 @@ class OpenGuiHook(Protocol):
     ) -> dict[str, str] | None: ...
 
 
-class ExpectationFailed(AssertionError):
+class ExpectationFailedError(AssertionError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
 
 
-class ExpectationMismatch(AssertionError):
+class ExpectationMismatchError(AssertionError):
     def __init__(self, label: str, expected: object, actual: object) -> None:
         super().__init__(f"{label}: expected {expected!r}, got {actual!r}")
 
 
+MISSING_EXIT_CODE = 2
+
+
 def expect(condition: object, message: str) -> None:
     if not bool(condition):
-        raise ExpectationFailed(message)
+        raise ExpectationFailedError(message)
 
 
 def expect_equal(actual: object, expected: object, *, label: str) -> None:
     if actual != expected:
-        raise ExpectationMismatch(label, expected, actual)
+        raise ExpectationMismatchError(label, expected, actual)
 
 
 def test_safe_call_and_try_emit() -> None:
@@ -58,8 +63,8 @@ def test_safe_call_and_try_emit() -> None:
     def should_not_run() -> None:
         calls.append("unreachable")
 
-    safe_call = module._safe_call  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-    try_emit: TryEmit = module._try_emit  # pyright: ignore[reportPrivateUsage]
+    safe_call: Callable[[Callable[[], None]], bool] = module._safe_call  # noqa: SLF001
+    try_emit: TryEmit = module._try_emit  # noqa: SLF001
 
     expect(not safe_call(raise_error), "safe_call should return False on exceptions")
     expect(safe_call(record_success), "safe_call should return True on success")
@@ -120,7 +125,10 @@ def test_persist_current_skips_missing_variables() -> None:
         inst = Harness(tokens=tokens, quiet=True)
         exit_code = inst.persist_current()
 
-    expect(exit_code == 2, "persist_current should return 2 for missing variable")
+    expect(
+        exit_code == MISSING_EXIT_CODE,
+        "persist_current should return 2 for missing variable",
+    )
 
 
 def test_apply_gui_values_reports_results() -> None:
@@ -162,7 +170,10 @@ def test_run_gui_uses_instance_tokens() -> None:
     with override_open_gui(fake_open_gui):
         exit_code = inst.run_gui()
 
-    expect(exit_code == 2, "run_gui should return 2 when GUI is cancelled")
+    expect(
+        exit_code == MISSING_EXIT_CODE,
+        "run_gui should return 2 when GUI is cancelled",
+    )
     expect(call_log, "open_gui should be invoked")
     recorded_tokens, kwargs = call_log[0]
     expect_equal(recorded_tokens, tuple(tokens), label="open_gui positional tokens")
@@ -183,15 +194,15 @@ def override_environ(values: Mapping[str, str]) -> Iterator[None]:
 
 @contextmanager
 def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
-    original = module._open_gui_and_collect  # pyright: ignore[reportPrivateUsage]
+    original: OpenGuiHook = module._open_gui_and_collect  # noqa: SLF001
 
     def recorder(
         tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
     ) -> dict[str, str] | None:
         return replacer(tokens, ctx=ctx, quiet=quiet)
 
-    module._open_gui_and_collect = recorder  # pyright: ignore[reportPrivateUsage]
+    module._open_gui_and_collect = recorder  # noqa: SLF001
     try:
         yield
     finally:
-        module._open_gui_and_collect = original  # pyright: ignore[reportPrivateUsage]
+        module._open_gui_and_collect = original  # noqa: SLF001
