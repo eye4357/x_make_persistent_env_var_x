@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import subprocess
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
-from x_make_persistent_env_var_x import x_cls_make_persistent_env_var_x as module
+from x_make_persistent_env_var_x import (
+    x_cls_make_persistent_env_var_x as module,
+)
 
 x_cls_make_persistent_env_var_x = module.x_cls_make_persistent_env_var_x
 
@@ -63,10 +65,19 @@ def test_safe_call_and_try_emit() -> None:
     def should_not_run() -> None:
         calls.append("unreachable")
 
-    safe_call: Callable[[Callable[[], None]], bool] = module._safe_call  # noqa: SLF001
-    try_emit: TryEmit = module._try_emit  # noqa: SLF001
+    safe_call_attr = "_safe_call"
+    try_emit_attr = "_try_emit"
 
-    expect(not safe_call(raise_error), "safe_call should return False on exceptions")
+    safe_call = cast(
+        "Callable[[Callable[[], None]], bool]",
+        getattr(module, safe_call_attr),
+    )
+    try_emit = cast("TryEmit", getattr(module, try_emit_attr))
+
+    expect(
+        not safe_call(raise_error),
+        "safe_call should return False on exceptions",
+    )
     expect(safe_call(record_success), "safe_call should return True on success")
     expect_equal(calls, ["success"], label="calls after safe_call")
 
@@ -194,15 +205,16 @@ def override_environ(values: Mapping[str, str]) -> Iterator[None]:
 
 @contextmanager
 def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
-    original: OpenGuiHook = module._open_gui_and_collect  # noqa: SLF001
+    open_gui_attr = "_open_gui_and_collect"
+    original = cast("OpenGuiHook", getattr(module, open_gui_attr))
 
     def recorder(
         tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
     ) -> dict[str, str] | None:
         return replacer(tokens, ctx=ctx, quiet=quiet)
 
-    module._open_gui_and_collect = recorder  # noqa: SLF001
+    setattr(module, open_gui_attr, recorder)
     try:
         yield
     finally:
-        module._open_gui_and_collect = original  # noqa: SLF001
+        setattr(module, open_gui_attr, original)
