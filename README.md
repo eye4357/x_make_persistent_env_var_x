@@ -1,9 +1,9 @@
-# x_make_persistent_env_var_x — Lab Notes from Walter White
+# x_make_persistent_env_var_x — Control Room Lab Notes
 
 > "Environment drift poisons deployments. I bottle the exact variables I need and store them where Windows will never lose them."
 
 ## Manifesto
-x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.0 reproducibility.
+x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.1 reproducibility.
 
 ## Ingredients
 - Python 3.11+
@@ -28,8 +28,8 @@ x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and pe
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.0 Control Room](../x_0_make_all_x/Change%20Control/0.20.0/index.md)
-- [Road to 0.20.0 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.0/Road%20to%200.20.0%20Engineering%20Proposal%20-%20Walter%20White.md)
+- [Road to 0.20.1 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
+- [Road to 0.20.1 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
 
 ## Cross-Linked Intelligence
 - [x_make_common_x](../x_make_common_x/README.md) — provides helpers for logging and subprocess control when editing the registry
