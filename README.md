@@ -3,7 +3,10 @@
 > "Environment drift poisons deployments. I bottle the exact variables I need and store them where Windows will never lose them."
 
 ## Manifesto
-x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.1 reproducibility.
+x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.2 reproducibility.
+
+## 0.20.2 Command Sequence
+Version 0.20.2 freezes the environment story in place. These instructions match the Road to 0.20.2 playbook so every variable you pin stays aligned with the release chemistry. Deviate and you contaminate the batch.
 
 ## Ingredients
 - Python 3.11+
@@ -28,8 +31,8 @@ x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and pe
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.1 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
-- [Road to 0.20.1 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
+- [Road to 0.20.2 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
+- [Road to 0.20.2 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
 
 ## Cross-Linked Intelligence
 - [x_make_common_x](../x_make_common_x/README.md) — provides helpers for logging and subprocess control when editing the registry
