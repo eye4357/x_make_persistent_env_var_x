@@ -2,6 +2,10 @@
 
 All notable changes to x_make_persistent_env_var_x stay in this ledger. We follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and Semantic Versioning because environment management demands proof.
 
+## [0.20.3] - 2025-10-14
+### Changed
+- Documentation refreshed for the Road to 0.20.3 release, noting the JSON metadata requirements for persistent environment exports.
+
 ## [0.20.2] - 2025-10-14
 ### Changed
 - Hardened the README and control notes for the Road to 0.20.2 checkpoint, spelling out the tightened environment management protocol.
