@@ -2,6 +2,11 @@
 
 All notable changes to x_make_persistent_env_var_x stay in this ledger. We follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and Semantic Versioning because environment management demands proof.
 
+## [0.20.4] - 2025-10-15
+### Changed
+- README aligned with the Road to 0.20.4 release, outlining how environment exports back the upcoming Kanban Environment Provisioning column.
+- Reinforced documentation for parking JSON evidence alongside orchestrator summaries so the provisioning automation has data when it lands.
+
 ## [0.20.3] - 2025-10-14
 ### Changed
 - Documentation refreshed for the Road to 0.20.3 release, noting the JSON metadata requirements for persistent environment exports.

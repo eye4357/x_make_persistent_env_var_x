@@ -3,10 +3,10 @@
 > "Environment drift poisons deployments. I bottle the exact variables I need and store them where Windows will never lose them."
 
 ## Manifesto
-x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.3 reproducibility.
+x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.4 reproducibility.
 
-## 0.20.3 Command Sequence
-Version 0.20.3 locks environment exports to the JSON-first ledger. Every variable you bottle now includes metadata compatible with the refreshed orchestrator snapshots.
+## 0.20.4 Command Sequence
+Version 0.20.4 recertifies the export ledger against the expanded Kanban. Every persisted variable callout now reminds operators to stash the JSON evidence alongside the orchestrator summary so the Environment Provisioning column has real data when its automation lands.
 
 ## Ingredients
 - Python 3.11+
@@ -31,7 +31,7 @@ Version 0.20.3 locks environment exports to the JSON-first ledger. Every variabl
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.3 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
+- [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
 - [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
 
 ## Cross-Linked Intelligence
