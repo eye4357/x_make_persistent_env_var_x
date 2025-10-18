@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import shutil
@@ -257,13 +258,19 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         return summaries, ok_all
 
     def run_gui(self) -> int:
-        vals = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
-        if vals is None:
-            if not self.quiet:
-                _info("GUI unavailable or cancelled; aborting.")
-            return 2
+        values = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
+        if values is None or all(not val for val in values.values()):
+            values = _prompt_for_values(self.tokens, quiet=self.quiet)
+            if values is None:
+                if not self.quiet:
+                    _info("No values captured; aborting.")
+                return 2
+            if not values:
+                if not self.quiet:
+                    _info("No values provided; aborting.")
+                return 2
 
-        summaries, ok_all = self._apply_gui_values(vals)
+        summaries, ok_all = self._apply_gui_values(values)
 
         if not self.quiet:
             _info("Results:")
@@ -292,6 +299,30 @@ def _open_gui_and_collect(
     prefill = _collect_prefill(tokens, ctx=ctx, quiet=quiet)
     root, _entries, _show_var, result = _build_gui_parts(_tk_runtime, tokens, prefill)
     return _run_gui_loop(root, result)
+
+
+def _prompt_for_values(
+    tokens: Sequence[Token], *, quiet: bool
+) -> dict[str, str] | None:
+    print("GUI unavailable. Falling back to console prompts.")
+    print(
+        "Provide secrets for each token. Leave blank to skip and keep existing user-scoped values."
+    )
+    collected: dict[str, str] = {}
+    capture_any = False
+    for var, label in tokens:
+        prompt = f"{label} ({var})?: "
+        try:
+            value = getpass.getpass(prompt)
+        except (EOFError, KeyboardInterrupt):
+            print("Aborted.")
+            return None
+        if value:
+            collected[var] = value
+            capture_any = True
+    if not capture_any:
+        return {}
+    return collected
 
 
 def _collect_prefill(
@@ -334,6 +365,8 @@ def _build_gui_parts(
         if var in prefill:
             ent.insert(0, prefill[var])
         entries[var] = ent
+        ent.grid(row=row, column=1, sticky="we", pady=4, padx=(6, 0))
+        frame.grid_columnconfigure(1, weight=1)
         row += 1
 
     chk = cast(
@@ -348,8 +381,26 @@ def _build_gui_parts(
     result: dict[str, str] = {}
 
     def on_set() -> None:
+        missing: list[str] = []
+        staged: dict[str, str] = {}
         for var, ent in entries.items():
-            result[var] = ent.get()
+            val = ent.get().strip()
+            if not val:
+                missing.append(var)
+            else:
+                staged[var] = val
+        if missing:
+            msg = (
+                "Provide values for all tokens before continuing.\nMissing: "
+                + ", ".join(missing)
+            )
+            messagebox = getattr(tk_mod, "messagebox", None)
+            if messagebox is not None:
+                _safe_call(lambda: messagebox.showerror("Tokens required", msg))
+            else:
+                _error(msg)
+            return
+        result.update(staged)
         root.destroy()
 
     def on_cancel() -> None:

@@ -34,6 +34,9 @@ Version 0.20.4 recertifies the export ledger against the expanded Kanban. Every 
 - [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
 - [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
 
+## Reconstitution Drill
+During the monthly lab rebuild, validate this toolkit on the clean machine: enumerate variables, set and unset values, export the JSON ledger, and confirm the orchestrator still sees the evidence. Clock the run time, record OS build and Python version, and patch this README plus Change Control if the drill uncovers drift.
+
 ## Cross-Linked Intelligence
 - [x_make_common_x](../x_make_common_x/README.md) — provides helpers for logging and subprocess control when editing the registry
 - [x_make_pip_updates_x](../x_make_pip_updates_x/README.md) — depends on precise environment switches to upgrade packages safely
@@ -41,3 +44,23 @@ Version 0.20.4 recertifies the export ledger against the expanded Kanban. Every 
 
 ## Lab Etiquette
 Capture every environment change with the Change Control index—variable name, scope, reason. Improvisation leads to contamination; documentation keeps the lab sterile.
+
+## Sole Architect Profile
+- I alone design and maintain the environment vault. My expertise spans Windows registry tuning, PowerShell automation, and Python GUI/CLI orchestration.
+- Acting as benevolent dictator ensures every variable policy, export format, and credential safeguard remains aligned across the lab.
+
+## Legacy Workforce Costing
+- Traditional build: 1 senior Windows automation engineer, 1 Python developer, 1 security specialist for credential stewardship, and 1 technical writer.
+- Timeline: 11-13 engineer-weeks to replicate CLI/GUI parity, JSON ledgers, and orchestrator hooks without LLM acceleration.
+- Budget: USD 95k–120k inclusive of the initial delivery, plus continued compliance maintenance.
+
+## Techniques and Proficiencies
+- Deep knowledge of Windows environment internals, registry interaction, and cross-shell automation.
+- Proven record shipping dual-surface tooling (CLI + Tkinter GUI) with strict logging and audit requirements.
+- Comfortable operating as the sole steward for security-sensitive automation that investors and operators both depend on.
+
+## Stack Cartography
+- Language Backbone: Python 3.11+, `tkinter`, `subprocess`, `json`, `pathlib`.
+- Tooling: PowerShell integration, Windows registry APIs, shared logging utilities from `x_make_common_x`.
+- Quality Net: Ruff, Black, MyPy, Pyright, pytest, manual GUI validation steps for Tkinter flows.
+- Outputs: JSON environment ledgers, orchestrator hooks for credential verification, Change Control attachments for every persisted secret.
