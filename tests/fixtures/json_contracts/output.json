@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "schema_version": "x_make_persistent_env_var_x.run/1.0",
+  "generated_at": "2025-10-18T00:10:00Z",
+  "summary": {
+    "action": "persist-values",
+    "tokens_total": 2,
+    "tokens_modified": 1,
+    "tokens_skipped": 1,
+    "tokens_failed": 0,
+    "exit_code": 0,
+    "quiet": false
+  },
+  "results": [
+    {
+      "name": "API_TOKEN",
+      "label": "API token",
+      "status": "persisted",
+      "attempted": true,
+      "stored": "<hidden>",
+      "stored_hash": "abcd1234",
+      "message": "updated",
+      "changed": true
+    },
+    {
+      "name": "DEBUG",
+      "label": "Enable debug",
+      "status": "unchanged",
+      "attempted": false,
+      "stored": "1",
+      "stored_hash": null,
+      "message": null,
+      "changed": false
+    }
+  ],
+  "messages": [
+    "Persisted 1 token"
+  ],
+  "environment_snapshot": {
+    "persist_path": "C:\\x_runner_x\\env\\persisted.json"
+  }
+}

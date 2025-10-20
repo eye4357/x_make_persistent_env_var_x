@@ -1,6 +1,6 @@
-# Changelog — Control Room Production Log
+# x_make_persistent_env_var_x — Production Ledger
 
-All notable changes to x_make_persistent_env_var_x stay in this ledger. We follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format and Semantic Versioning because environment management demands proof.
+I catalogue every substantive adjustment to this environment vault here. Entries obey [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so compliance teams can tie configuration evidence to specific releases.
 
 ## [0.20.4] - 2025-10-15
 ### Changed

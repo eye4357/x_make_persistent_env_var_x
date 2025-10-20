@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+import argparse
 import getpass
+import hashlib
+import json
 import logging
 import os
 import shutil
 import subprocess
-import sys
 import sys as _sys
 import types
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar, cast
+
+from jsonschema import ValidationError
+from x_make_common_x.json_contracts import validate_payload
+
+from x_make_persistent_env_var_x.json_contracts import (
+    ERROR_SCHEMA,
+    INPUT_SCHEMA,
+    OUTPUT_SCHEMA,
+)
 
 ModuleType = types.ModuleType
 
@@ -53,7 +68,7 @@ if TYPE_CHECKING:
         def get(self) -> bool | int: ...
 
     class TkFrame(_TkSupportsPack, _TkSupportsGrid, Protocol):
-        pass
+        def grid_columnconfigure(self, index: int, weight: int) -> None: ...
 
     class TkLabel(_TkSupportsGrid, Protocol):
         pass
@@ -141,6 +156,119 @@ _DEFAULT_TOKENS: tuple[Token, ...] = (
     ("GITHUB_TOKEN", "GitHub Token"),
 )
 
+SCHEMA_VERSION = "x_make_persistent_env_var_x.run/1.0"
+
+
+@dataclass(slots=True)
+class TokenSpec:
+    name: str
+    label: str | None
+    required: bool
+
+    @property
+    def display_label(self) -> str:
+        return self.label or self.name
+
+
+_DEFAULT_TOKEN_SPECS: tuple[TokenSpec, ...] = tuple(
+    TokenSpec(name=token_name, label=token_label, required=True)
+    for token_name, token_label in _DEFAULT_TOKENS
+)
+
+
+@dataclass(slots=True)
+class _RunOutcome:
+    action: str
+    results: list[dict[str, object]]
+    tokens_total: int
+    tokens_modified: int
+    tokens_skipped: int
+    tokens_failed: int
+    exit_code: int
+    messages: list[str]
+    snapshot: dict[str, object]
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace(
+        "+00:00", "Z"
+    )
+
+
+def _hash_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
+def _should_redact(name: str) -> bool:
+    upper = name.upper()
+    sensitive_markers = ("TOKEN", "SECRET", "PASSWORD", "KEY", "API")
+    return any(marker in upper for marker in sensitive_markers)
+
+
+def _display_value(name: str, value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if _should_redact(name):
+        return "<hidden>"
+    return value
+
+
+def _build_token_specs(raw: object) -> tuple[TokenSpec, ...]:
+    if not isinstance(raw, Sequence):
+        return _DEFAULT_TOKEN_SPECS
+    specs: list[TokenSpec] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            continue
+        name_obj = entry.get("name")
+        if not isinstance(name_obj, str) or not name_obj:
+            continue
+        if name_obj in seen:
+            continue
+        label_obj = entry.get("label")
+        label = label_obj if isinstance(label_obj, str) and label_obj else None
+        required_obj = entry.get("required")
+        required = bool(required_obj) if isinstance(required_obj, bool) else False
+        specs.append(TokenSpec(name=name_obj, label=label, required=required))
+        seen.add(name_obj)
+    return tuple(specs) if specs else _DEFAULT_TOKEN_SPECS
+
+
+def _token_tuples(specs: Sequence[TokenSpec]) -> tuple[Token, ...]:
+    return tuple((spec.name, spec.display_label) for spec in specs)
+
+
+def _normalize_values(raw: object) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        return {}
+    result: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, str) and value:
+            result[key] = value
+    return result
+
+
+def _failure_payload(
+    message: str,
+    *,
+    exit_code: int | None = None,
+    details: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"status": "failure", "message": message}
+    if exit_code is not None:
+        payload["exit_code"] = exit_code
+    if details:
+        payload["details"] = dict(details)
+    try:
+        validate_payload(payload, ERROR_SCHEMA)
+    except ValidationError:
+        pass
+    return payload
+
 
 class x_cls_make_persistent_env_var_x:  # noqa: N801
     """Persistent environment variable setter (Windows user scope)."""
@@ -152,15 +280,24 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         *,
         quiet: bool = False,
         tokens: Sequence[Token] | None = None,
+        token_specs: Sequence[TokenSpec] | None = None,
         ctx: object | None = None,
     ) -> None:
         self.var = var
         self.value = value
         self.quiet = quiet
-        self.tokens: tuple[Token, ...] = (
-            tuple(tokens) if tokens is not None else _DEFAULT_TOKENS
-        )
+        if token_specs is not None:
+            resolved_specs = tuple(token_specs)
+        elif tokens is not None:
+            resolved_specs = tuple(
+                TokenSpec(name=token_name, label=token_label, required=True)
+                for token_name, token_label in tokens
+            )
+        else:
+            resolved_specs = _DEFAULT_TOKEN_SPECS
+        self.tokens = _token_tuples(resolved_specs)
         self._ctx = ctx
+        self.token_specs = resolved_specs
 
     def _is_verbose(self) -> bool:
         attr: object = getattr(self._ctx, "verbose", False)
@@ -434,7 +571,480 @@ def _run_gui_loop(root: TkRoot, result: dict[str, str]) -> dict[str, str] | None
     return result if result else None
 
 
+def _collect_user_environment(
+    token_specs: Sequence[TokenSpec],
+    *,
+    quiet: bool,
+    ctx: object | None,
+) -> dict[str, str | None]:
+    snapshot: dict[str, str | None] = {}
+    token_pairs = _token_tuples(token_specs)
+    for spec in token_specs:
+        reader = x_cls_make_persistent_env_var_x(
+            spec.name,
+            "",
+            quiet=quiet,
+            tokens=token_pairs,
+            token_specs=token_specs,
+            ctx=ctx,
+        )
+        snapshot[spec.name] = reader.get_user_env()
+    return snapshot
+
+
+def _perform_persist_current(
+    token_specs: Sequence[TokenSpec],
+    *,
+    quiet: bool,
+    include_existing: bool,
+    ctx: object | None,
+) -> _RunOutcome:
+    token_specs = tuple(token_specs)
+    token_pairs = _token_tuples(token_specs)
+    results: list[dict[str, object]] = []
+    tokens_modified = 0
+    tokens_skipped = 0
+    tokens_failed = 0
+    messages: list[str] = []
+
+    for spec in token_specs:
+        session_value = os.environ.get(spec.name)
+        reader = x_cls_make_persistent_env_var_x(
+            spec.name,
+            "",
+            quiet=quiet,
+            tokens=token_pairs,
+            token_specs=token_specs,
+            ctx=ctx,
+        )
+        before = reader.get_user_env()
+
+        if not session_value:
+            results.append(
+                {
+                    "name": spec.name,
+                    "label": spec.display_label,
+                    "status": "skipped",
+                    "attempted": False,
+                    "stored": _display_value(spec.name, before),
+                    "stored_hash": _hash_value(before),
+                    "message": "variable missing from current session",
+                    "changed": False,
+                }
+            )
+            tokens_skipped += 1
+            continue
+
+        setter = x_cls_make_persistent_env_var_x(
+            spec.name,
+            session_value,
+            quiet=quiet,
+            tokens=token_pairs,
+            token_specs=token_specs,
+            ctx=ctx,
+        )
+        ok = setter.set_user_env()
+        after = setter.get_user_env()
+        entry: dict[str, object] = {
+            "name": spec.name,
+            "label": spec.display_label,
+            "attempted": True,
+            "stored": _display_value(spec.name, after),
+            "stored_hash": _hash_value(after),
+        }
+        if not ok or after != session_value:
+            entry["status"] = "failed"
+            entry["message"] = "failed to persist value"
+            entry["changed"] = False
+            tokens_failed += 1
+        else:
+            changed = before != after
+            entry["status"] = "persisted" if changed else "unchanged"
+            entry["message"] = "updated" if changed else "already current"
+            entry["changed"] = changed
+            if changed:
+                tokens_modified += 1
+        results.append(entry)
+
+    if tokens_failed:
+        exit_code = 1
+    elif tokens_modified:
+        exit_code = 0
+    else:
+        exit_code = 2
+
+    if tokens_modified:
+        messages.append(
+            f"Persisted {tokens_modified} token{'s' if tokens_modified != 1 else ''} from session"
+        )
+    if tokens_skipped:
+        messages.append(
+            f"Skipped {tokens_skipped} token{'s' if tokens_skipped != 1 else ''} (missing session value)"
+        )
+    if tokens_failed:
+        messages.append(
+            f"Failed to persist {tokens_failed} token{'s' if tokens_failed != 1 else ''}"
+        )
+
+    snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
+    snapshot: dict[str, object] = {
+        "user": {
+            name: _display_value(name, value)
+            for name, value in snapshot_user.items()
+        }
+    }
+    if include_existing:
+        snapshot["session"] = {
+            spec.name: _display_value(spec.name, os.environ.get(spec.name))
+            for spec in token_specs
+        }
+
+    return _RunOutcome(
+        action="persist-current",
+        results=results,
+        tokens_total=len(token_specs),
+        tokens_modified=tokens_modified,
+        tokens_skipped=tokens_skipped,
+        tokens_failed=tokens_failed,
+        exit_code=exit_code,
+        messages=messages,
+        snapshot=snapshot,
+    )
+
+
+def _perform_persist_values(
+    token_specs: Sequence[TokenSpec],
+    values: Mapping[str, str],
+    *,
+    quiet: bool,
+    include_existing: bool,
+    ctx: object | None,
+) -> _RunOutcome:
+    token_specs = tuple(token_specs)
+    token_pairs = _token_tuples(token_specs)
+    results: list[dict[str, object]] = []
+    tokens_modified = 0
+    tokens_skipped = 0
+    tokens_failed = 0
+    provided_redacted = {
+        name: _display_value(name, value)
+        for name, value in values.items()
+    }
+
+    for spec in token_specs:
+        provided = values.get(spec.name)
+        reader = x_cls_make_persistent_env_var_x(
+            spec.name,
+            "",
+            quiet=quiet,
+            tokens=token_pairs,
+            token_specs=token_specs,
+            ctx=ctx,
+        )
+        before = reader.get_user_env()
+        entry: dict[str, object] = {
+            "name": spec.name,
+            "label": spec.display_label,
+        }
+
+        if not provided:
+            status = "failed" if spec.required else "skipped"
+            if status == "failed":
+                tokens_failed += 1
+            else:
+                tokens_skipped += 1
+            entry.update(
+                {
+                    "status": status,
+                    "attempted": False,
+                    "stored": _display_value(spec.name, before),
+                    "stored_hash": _hash_value(before),
+                    "message": (
+                        "required value missing"
+                        if status == "failed"
+                        else "no value provided"
+                    ),
+                    "changed": False,
+                }
+            )
+            results.append(entry)
+            continue
+
+        setter = x_cls_make_persistent_env_var_x(
+            spec.name,
+            provided,
+            quiet=quiet,
+            tokens=token_pairs,
+            token_specs=token_specs,
+            ctx=ctx,
+        )
+        ok = setter.set_user_env()
+        after = setter.get_user_env()
+        entry.update(
+            {
+                "attempted": True,
+                "stored": _display_value(spec.name, after),
+                "stored_hash": _hash_value(after),
+            }
+        )
+        if not ok or after != provided:
+            entry.update(
+                {
+                    "status": "failed",
+                    "message": "failed to persist value",
+                    "changed": False,
+                }
+            )
+            tokens_failed += 1
+        else:
+            changed = before != after
+            entry.update(
+                {
+                    "status": "persisted" if changed else "unchanged",
+                    "message": "updated" if changed else "already current",
+                    "changed": changed,
+                }
+            )
+            if changed:
+                tokens_modified += 1
+        results.append(entry)
+
+    snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
+    snapshot: dict[str, object] = {
+        "user": {
+            name: _display_value(name, value)
+            for name, value in snapshot_user.items()
+        },
+        "provided": provided_redacted,
+    }
+    if include_existing:
+        snapshot["session"] = {
+            spec.name: _display_value(spec.name, os.environ.get(spec.name))
+            for spec in token_specs
+        }
+
+    if tokens_failed:
+        exit_code = 1
+    else:
+        exit_code = 0
+
+    messages: list[str] = []
+    if tokens_modified:
+        messages.append(
+            f"Persisted {tokens_modified} token{'s' if tokens_modified != 1 else ''}"
+        )
+    if tokens_skipped:
+        messages.append(
+            f"Skipped {tokens_skipped} token{'s' if tokens_skipped != 1 else ''}"
+        )
+    if tokens_failed:
+        messages.append(
+            f"Failed to persist {tokens_failed} token{'s' if tokens_failed != 1 else ''}"
+        )
+
+    return _RunOutcome(
+        action="persist-values",
+        results=results,
+        tokens_total=len(token_specs),
+        tokens_modified=tokens_modified,
+        tokens_skipped=tokens_skipped,
+        tokens_failed=tokens_failed,
+        exit_code=exit_code,
+        messages=messages,
+        snapshot=snapshot,
+    )
+
+
+def _perform_inspect(
+    token_specs: Sequence[TokenSpec],
+    *,
+    quiet: bool,
+    include_existing: bool,
+    ctx: object | None,
+) -> _RunOutcome:
+    token_specs = tuple(token_specs)
+    snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
+    results: list[dict[str, object]] = []
+    for spec in token_specs:
+        stored = snapshot_user.get(spec.name)
+        results.append(
+            {
+                "name": spec.name,
+                "label": spec.display_label,
+                "status": "unchanged",
+                "attempted": False,
+                "stored": _display_value(spec.name, stored),
+                "stored_hash": _hash_value(stored),
+                "message": "inspected",
+                "changed": False,
+            }
+        )
+
+    snapshot: dict[str, object] = {
+        "user": {
+            name: _display_value(name, value)
+            for name, value in snapshot_user.items()
+        }
+    }
+    if include_existing:
+        snapshot["session"] = {
+            spec.name: _display_value(spec.name, os.environ.get(spec.name))
+            for spec in token_specs
+        }
+
+    messages = ["Inspection completed"]
+
+    return _RunOutcome(
+        action="inspect",
+        results=results,
+        tokens_total=len(token_specs),
+        tokens_modified=0,
+        tokens_skipped=0,
+        tokens_failed=0,
+        exit_code=0,
+        messages=messages,
+        snapshot=snapshot,
+    )
+
+
+def main_json(payload: Mapping[str, object], *, ctx: object | None = None) -> dict[str, object]:
+    try:
+        validate_payload(payload, INPUT_SCHEMA)
+    except ValidationError as exc:
+        return _failure_payload(
+            "input payload failed validation",
+            exit_code=2,
+            details={
+                "error": exc.message,
+                "path": [str(part) for part in exc.path],
+                "schema_path": [str(part) for part in exc.schema_path],
+            },
+        )
+
+    parameters_obj = payload.get("parameters", {})
+    parameters = cast("Mapping[str, object]", parameters_obj)
+
+    action_obj = parameters.get("action")
+    action = cast("str", action_obj)
+    quiet_obj = parameters.get("quiet", False)
+    quiet = bool(quiet_obj) if not isinstance(quiet_obj, bool) else quiet_obj
+    include_existing_obj = parameters.get("include_existing", False)
+    include_existing = (
+        bool(include_existing_obj)
+        if not isinstance(include_existing_obj, bool)
+        else include_existing_obj
+    )
+    notes_obj = parameters.get("notes")
+    notes = notes_obj if isinstance(notes_obj, str) and notes_obj else None
+
+    token_specs = _build_token_specs(parameters.get("tokens"))
+    values = _normalize_values(parameters.get("values"))
+
+    if action == "persist-current":
+        outcome = _perform_persist_current(
+            token_specs,
+            quiet=quiet,
+            include_existing=include_existing,
+            ctx=ctx,
+        )
+    elif action == "persist-values":
+        outcome = _perform_persist_values(
+            token_specs,
+            values,
+            quiet=quiet,
+            include_existing=include_existing,
+            ctx=ctx,
+        )
+    elif action == "inspect":
+        outcome = _perform_inspect(
+            token_specs,
+            quiet=quiet,
+            include_existing=include_existing,
+            ctx=ctx,
+        )
+    else:  # pragma: no cover - schema restricts action values
+        return _failure_payload(
+            "unsupported action",
+            exit_code=1,
+            details={"action": action},
+        )
+
+    summary: dict[str, object] = {
+        "action": outcome.action,
+        "tokens_total": outcome.tokens_total,
+        "tokens_modified": outcome.tokens_modified,
+        "tokens_skipped": outcome.tokens_skipped,
+        "tokens_failed": outcome.tokens_failed,
+        "exit_code": outcome.exit_code,
+        "quiet": quiet,
+    }
+    if include_existing:
+        summary["include_existing"] = True
+
+    snapshot = dict(outcome.snapshot)
+    if notes:
+        snapshot.setdefault("notes", notes)
+
+    result = {
+        "status": "success",
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": _timestamp(),
+        "summary": summary,
+        "results": outcome.results,
+        "messages": outcome.messages,
+        "environment_snapshot": snapshot,
+    }
+
+    try:
+        validate_payload(result, OUTPUT_SCHEMA)
+    except ValidationError as exc:
+        return _failure_payload(
+            "generated output failed schema validation",
+            exit_code=1,
+            details={
+                "error": exc.message,
+                "path": [str(part) for part in exc.path],
+                "schema_path": [str(part) for part in exc.schema_path],
+            },
+        )
+
+    return result
+
+
+def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
+    if file_path:
+        with Path(file_path).open("r", encoding="utf-8") as handle:
+            return cast("Mapping[str, object]", json.load(handle))
+    return cast("Mapping[str, object]", json.load(_sys.stdin))
+
+
+def _run_json_cli(args: Sequence[str]) -> None:
+    parser = argparse.ArgumentParser(
+        description="x_make_persistent_env_var_x JSON runner"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Read JSON payload from stdin",
+    )
+    parser.add_argument(
+        "--json-file",
+        type=str,
+        help="Path to JSON payload file",
+    )
+    parsed = parser.parse_args(args)
+
+    if not (parsed.json or parsed.json_file):
+        parser.error("JSON input required. Use --json for stdin or --json-file <path>.")
+
+    payload = _load_json_payload(parsed.json_file if parsed.json_file else None)
+    result = main_json(payload)
+    json.dump(result, _sys.stdout, indent=2)
+    _sys.stdout.write("\n")
+
+
+__all__ = ["main_json", "x_cls_make_persistent_env_var_x"]
+
+
 if __name__ == "__main__":
-    inst = x_cls_make_persistent_env_var_x()
-    code = inst.run_gui()
-    sys.exit(code)
+    _run_json_cli(_sys.argv[1:])

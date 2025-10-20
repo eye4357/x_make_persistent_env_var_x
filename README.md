@@ -1,66 +1,62 @@
-# x_make_persistent_env_var_x — Control Room Lab Notes
+# x_make_persistent_env_var_x — Environment Vault Manual
 
-> "Environment drift poisons deployments. I bottle the exact variables I need and store them where Windows will never lose them."
+This vault locks down environment variables so the lab never loses a credential or toggle between sessions. Works on my machine? Not in my jurisdiction.
 
-## Manifesto
-x_make_persistent_env_var_x is the lab's toolkit for inspecting, editing, and persisting environment variables across sessions. It's the antidote to "works on my machine"—critical for Road to 0.20.4 reproducibility.
+## Mission Log
+- Inspect, create, update, and purge environment variables across user and system scopes.
+- Persist changes with JSON ledgers that the orchestrator and Change Control teams can audit.
+- Offer both CLI and Tkinter surfaces so operators handle secrets the way the situation demands.
+- Guard against drift with deterministic logging, registry safeguards, and typed interfaces.
 
-## 0.20.4 Command Sequence
-Version 0.20.4 recertifies the export ledger against the expanded Kanban. Every persisted variable callout now reminds operators to stash the JSON evidence alongside the orchestrator summary so the Environment Provisioning column has real data when its automation lands.
+## Instrumentation
+- Python 3.11 or newer.
+- Ruff, Black, MyPy, Pyright, pytest for hygiene.
+- Tkinter (bundled on Windows) when using the GUI flows.
 
-## Ingredients
-- Python 3.11+
-- Ruff, Black, MyPy, and Pyright
-- Optional: Tkinter (bundled with CPython on Windows) when you enable the GUI helpers
-
-## Cook Instructions
+## Operating Procedure
 1. `python -m venv .venv`
-2. `.\.venv\Scripts\Activate.ps1`
+2. `\.venv\Scripts\Activate.ps1`
 3. `python -m pip install --upgrade pip`
 4. `pip install -r requirements.txt`
-5. `python -m x_make_persistent_env_var_x` to launch the CLI or GUI tasks for environment management
+5. `python -m x_make_persistent_env_var_x`
 
-## Quality Assurance
+Use the CLI to script changes or launch the GUI to edit variables interactively. Export JSON evidence after every session and stash it beside the orchestrator summary.
+
+## Evidence Checks
 | Check | Command |
 | --- | --- |
-| Formatting sweep | `python -m black .`
-| Lint interrogation | `python -m ruff check .`
-| Type audit | `python -m mypy .`
-| Static contract scan | `python -m pyright`
-| Functional verification | `pytest`
+| Formatting sweep | `python -m black .` |
+| Lint interrogation | `python -m ruff check .` |
+| Type audit | `python -m mypy .` |
+| Static contract scan | `python -m pyright` |
+| Functional verification | `pytest` |
 
-## Distribution Chain
+## System Linkage
 - [Changelog](./CHANGELOG.md)
 - [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
 - [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
 
 ## Reconstitution Drill
-During the monthly lab rebuild, validate this toolkit on the clean machine: enumerate variables, set and unset values, export the JSON ledger, and confirm the orchestrator still sees the evidence. Clock the run time, record OS build and Python version, and patch this README plus Change Control if the drill uncovers drift.
+On the monthly rebuild I certify this vault on a sterile machine: list variables, set and unset entries, export the ledger, and confirm the orchestrator recognises the evidence. I log OS build, Python version, and run time; any anomaly gets recorded in Change Control and resolved immediately.
 
-## Cross-Linked Intelligence
-- [x_make_common_x](../x_make_common_x/README.md) — provides helpers for logging and subprocess control when editing the registry
-- [x_make_pip_updates_x](../x_make_pip_updates_x/README.md) — depends on precise environment switches to upgrade packages safely
-- [x_0_make_all_x](../x_0_make_all_x/README.md) — orchestrator expects consistent env configs before running release workflows
+## Cross-Referenced Assets
+- [x_make_common_x](../x_make_common_x/README.md) — logging and subprocess harnesses supporting registry work.
+- [x_make_pip_updates_x](../x_make_pip_updates_x/README.md) — depends on accurate environment toggles during package refreshes.
+- [x_0_make_all_x](../x_0_make_all_x/README.md) — orchestrator that refuses to run without verified environment state.
 
-## Lab Etiquette
-Capture every environment change with the Change Control index—variable name, scope, reason. Improvisation leads to contamination; documentation keeps the lab sterile.
+## Conduct Code
+Every mutation demands a ledger entry: variable name, scope, rationale. No improvisation. Environments are hazardous materials—label them or lose your license.
 
-## Sole Architect Profile
-- I alone design and maintain the environment vault. My expertise spans Windows registry tuning, PowerShell automation, and Python GUI/CLI orchestration.
-- Acting as benevolent dictator ensures every variable policy, export format, and credential safeguard remains aligned across the lab.
+## Sole Architect's Note
+I crafted this vault alone. Registry tuning, PowerShell glue, Python interfaces, security posture—it all flows through my hands so accountability is singular.
 
-## Legacy Workforce Costing
-- Traditional build: 1 senior Windows automation engineer, 1 Python developer, 1 security specialist for credential stewardship, and 1 technical writer.
-- Timeline: 11-13 engineer-weeks to replicate CLI/GUI parity, JSON ledgers, and orchestrator hooks without LLM acceleration.
-- Budget: USD 95k–120k inclusive of the initial delivery, plus continued compliance maintenance.
+## Legacy Staffing Estimate
+- Without AI support you'd staff: 1 Windows automation lead, 1 Python engineer, 1 security specialist, 1 technical writer.
+- Delivery window: 11–13 engineer-weeks for parity.
+- Budget: USD 95k–120k plus ongoing compliance upkeep.
 
-## Techniques and Proficiencies
-- Deep knowledge of Windows environment internals, registry interaction, and cross-shell automation.
-- Proven record shipping dual-surface tooling (CLI + Tkinter GUI) with strict logging and audit requirements.
-- Comfortable operating as the sole steward for security-sensitive automation that investors and operators both depend on.
-
-## Stack Cartography
+## Technical Footprint
 - Language Backbone: Python 3.11+, `tkinter`, `subprocess`, `json`, `pathlib`.
-- Tooling: PowerShell integration, Windows registry APIs, shared logging utilities from `x_make_common_x`.
-- Quality Net: Ruff, Black, MyPy, Pyright, pytest, manual GUI validation steps for Tkinter flows.
+- Tooling Mesh: PowerShell integration, Windows registry APIs, shared logging utilities from `x_make_common_x`.
+- Quality Net: Ruff, Black, MyPy, Pyright, pytest, manual GUI regression passes.
 - Outputs: JSON environment ledgers, orchestrator hooks for credential verification, Change Control attachments for every persisted secret.

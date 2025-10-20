@@ -1,0 +1,25 @@
+{
+  "command": "x_make_persistent_env_var_x",
+  "parameters": {
+    "action": "persist-values",
+    "tokens": [
+      {
+        "name": "API_TOKEN",
+        "label": "API token",
+        "required": true
+      },
+      {
+        "name": "DEBUG",
+        "label": "Enable debug",
+        "required": false
+      }
+    ],
+    "values": {
+      "API_TOKEN": "secret-value",
+      "DEBUG": "1"
+    },
+    "quiet": false,
+    "include_existing": true,
+    "notes": "Persist API token for CI"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "status": "failure",
+  "message": "Failed to persist environment variables",
+  "exit_code": 1,
+  "details": {
+    "token": "API_TOKEN",
+    "reason": "missing value"
+  }
+}

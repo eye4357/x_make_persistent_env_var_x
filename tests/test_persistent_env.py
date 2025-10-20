@@ -178,7 +178,15 @@ def test_run_gui_uses_instance_tokens() -> None:
         call_log.append((tuple(tokens), {"ctx": ctx, "quiet": quiet}))
         return None
 
-    with override_open_gui(fake_open_gui):
+    def fake_prompt(
+        tokens: Sequence[tuple[str, str]], quiet: bool
+    ) -> dict[str, str] | None:
+        prompt_calls.append((tuple(tokens), quiet))
+        return {}
+
+    prompt_calls: list[tuple[tuple[tuple[str, str], ...], bool]] = []
+
+    with override_open_gui(fake_open_gui), override_prompt_for_values(fake_prompt):
         exit_code = inst.run_gui()
 
     expect(
@@ -189,6 +197,7 @@ def test_run_gui_uses_instance_tokens() -> None:
     recorded_tokens, kwargs = call_log[0]
     expect_equal(recorded_tokens, tuple(tokens), label="open_gui positional tokens")
     expect_equal(kwargs, {"ctx": None, "quiet": True}, label="open_gui kwargs")
+    expect_equal(len(prompt_calls), 1, label="prompt_for_values invocation count")
 
 
 @contextmanager
@@ -218,3 +227,22 @@ def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
         yield
     finally:
         setattr(module, open_gui_attr, original)
+
+
+@contextmanager
+def override_prompt_for_values(
+    replacer: Callable[[Sequence[tuple[str, str]], bool], dict[str, str] | None]
+) -> Iterator[None]:
+    prompt_attr = "_prompt_for_values"
+    original = cast("Callable[..., dict[str, str] | None]", getattr(module, prompt_attr))
+
+    def wrapper(
+        tokens: Sequence[tuple[str, str]], *, quiet: bool
+    ) -> dict[str, str] | None:
+        return replacer(tokens, quiet)
+
+    setattr(module, prompt_attr, wrapper)
+    try:
+        yield
+    finally:
+        setattr(module, prompt_attr, original)
