@@ -149,7 +149,9 @@ def test_main_json_persist_values_success(
     assert user_obj.get("DEBUG") == "1"
 
 
-def test_main_json_persist_current_handles_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_json_persist_current_handles_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload = {
         "command": "x_make_persistent_env_var_x",
         "parameters": {

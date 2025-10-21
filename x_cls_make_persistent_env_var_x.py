@@ -190,9 +190,7 @@ class _RunOutcome:
 
 
 def _timestamp() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _hash_value(value: str | None) -> str | None:
@@ -689,8 +687,7 @@ def _perform_persist_current(
     snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
     snapshot: dict[str, object] = {
         "user": {
-            name: _display_value(name, value)
-            for name, value in snapshot_user.items()
+            name: _display_value(name, value) for name, value in snapshot_user.items()
         }
     }
     if include_existing:
@@ -727,8 +724,7 @@ def _perform_persist_values(
     tokens_skipped = 0
     tokens_failed = 0
     provided_redacted = {
-        name: _display_value(name, value)
-        for name, value in values.items()
+        name: _display_value(name, value) for name, value in values.items()
     }
 
     for spec in token_specs:
@@ -812,8 +808,7 @@ def _perform_persist_values(
     snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
     snapshot: dict[str, object] = {
         "user": {
-            name: _display_value(name, value)
-            for name, value in snapshot_user.items()
+            name: _display_value(name, value) for name, value in snapshot_user.items()
         },
         "provided": provided_redacted,
     }
@@ -882,8 +877,7 @@ def _perform_inspect(
 
     snapshot: dict[str, object] = {
         "user": {
-            name: _display_value(name, value)
-            for name, value in snapshot_user.items()
+            name: _display_value(name, value) for name, value in snapshot_user.items()
         }
     }
     if include_existing:
@@ -907,7 +901,9 @@ def _perform_inspect(
     )
 
 
-def main_json(payload: Mapping[str, object], *, ctx: object | None = None) -> dict[str, object]:
+def main_json(
+    payload: Mapping[str, object], *, ctx: object | None = None
+) -> dict[str, object]:
     try:
         validate_payload(payload, INPUT_SCHEMA)
     except ValidationError as exc:

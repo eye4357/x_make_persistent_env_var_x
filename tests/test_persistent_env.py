@@ -231,10 +231,12 @@ def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
 
 @contextmanager
 def override_prompt_for_values(
-    replacer: Callable[[Sequence[tuple[str, str]], bool], dict[str, str] | None]
+    replacer: Callable[[Sequence[tuple[str, str]], bool], dict[str, str] | None],
 ) -> Iterator[None]:
     prompt_attr = "_prompt_for_values"
-    original = cast("Callable[..., dict[str, str] | None]", getattr(module, prompt_attr))
+    original = cast(
+        "Callable[..., dict[str, str] | None]", getattr(module, prompt_attr)
+    )
 
     def wrapper(
         tokens: Sequence[tuple[str, str]], *, quiet: bool
