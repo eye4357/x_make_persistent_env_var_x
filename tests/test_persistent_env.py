@@ -29,6 +29,12 @@ class OpenGuiHook(Protocol):
     ) -> dict[str, str] | None: ...
 
 
+class PromptHook(Protocol):
+    def __call__(
+        self, tokens: Sequence[tuple[str, str]], *, quiet: bool
+    ) -> dict[str, str] | None: ...
+
+
 class ExpectationFailedError(AssertionError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
@@ -179,7 +185,7 @@ def test_run_gui_uses_instance_tokens() -> None:
         return None
 
     def fake_prompt(
-        tokens: Sequence[tuple[str, str]], quiet: bool
+        tokens: Sequence[tuple[str, str]], *, quiet: bool
     ) -> dict[str, str] | None:
         prompt_calls.append((tuple(tokens), quiet))
         return {}
@@ -230,18 +236,14 @@ def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
 
 
 @contextmanager
-def override_prompt_for_values(
-    replacer: Callable[[Sequence[tuple[str, str]], bool], dict[str, str] | None],
-) -> Iterator[None]:
+def override_prompt_for_values(replacer: PromptHook) -> Iterator[None]:
     prompt_attr = "_prompt_for_values"
-    original = cast(
-        "Callable[..., dict[str, str] | None]", getattr(module, prompt_attr)
-    )
+    original = cast("PromptHook", getattr(module, prompt_attr))
 
     def wrapper(
         tokens: Sequence[tuple[str, str]], *, quiet: bool
     ) -> dict[str, str] | None:
-        return replacer(tokens, quiet)
+        return replacer(tokens, quiet=quiet)
 
     setattr(module, prompt_attr, wrapper)
     try:

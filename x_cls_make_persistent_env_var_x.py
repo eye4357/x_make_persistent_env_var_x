@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys as _sys
 import types
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,8 +28,9 @@ from x_make_persistent_env_var_x.json_contracts import (
 
 ModuleType = types.ModuleType
 
+ValidationErrorType: type[Exception] = ValidationError
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
     from typing import Protocol
 
     class _TkSupportsGrid(Protocol):
@@ -214,6 +215,26 @@ def _display_value(name: str, value: str | None) -> str | None:
     return value
 
 
+def _token_plural(count: int) -> str:
+    return "" if count == 1 else "s"
+
+
+def _format_token_message(template: str, count: int) -> str:
+    return template.format(count=count, plural=_token_plural(count))
+
+
+def _exit_code_for_current(tokens_modified: int, tokens_failed: int) -> int:
+    if tokens_failed:
+        return 1
+    if tokens_modified:
+        return 0
+    return 2
+
+
+def _exit_code_for_values(tokens_failed: int) -> int:
+    return 1 if tokens_failed else 0
+
+
 def _build_token_specs(raw: object) -> tuple[TokenSpec, ...]:
     if not isinstance(raw, Sequence):
         return _DEFAULT_TOKEN_SPECS
@@ -243,11 +264,11 @@ def _token_tuples(specs: Sequence[TokenSpec]) -> tuple[Token, ...]:
 def _normalize_values(raw: object) -> dict[str, str]:
     if not isinstance(raw, Mapping):
         return {}
-    result: dict[str, str] = {}
-    for key, value in raw.items():
-        if isinstance(key, str) and isinstance(value, str) and value:
-            result[key] = value
-    return result
+    return {
+        key: value
+        for key, value in raw.items()
+        if isinstance(key, str) and isinstance(value, str) and value
+    }
 
 
 def _failure_payload(
@@ -261,10 +282,8 @@ def _failure_payload(
         payload["exit_code"] = exit_code
     if details:
         payload["details"] = dict(details)
-    try:
+    with suppress(ValidationErrorType):
         validate_payload(payload, ERROR_SCHEMA)
-    except ValidationError:
-        pass
     return payload
 
 
@@ -277,13 +296,26 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         value: str = "",
         *,
         quiet: bool = False,
-        tokens: Sequence[Token] | None = None,
-        token_specs: Sequence[TokenSpec] | None = None,
         ctx: object | None = None,
+        **token_options: object,
     ) -> None:
         self.var = var
         self.value = value
         self.quiet = quiet
+        allowed_keys = {"tokens", "token_specs"}
+        unexpected = set(token_options) - allowed_keys
+        if unexpected:
+            unexpected_keys = ", ".join(sorted(unexpected))
+            message = f"Unexpected token option(s): {unexpected_keys}"
+            raise TypeError(message)
+        tokens = cast(
+            "Sequence[Token] | None",
+            token_options.get("tokens"),
+        )
+        token_specs = cast(
+            "Sequence[TokenSpec] | None",
+            token_options.get("token_specs"),
+        )
         if token_specs is not None:
             resolved_specs = tuple(token_specs)
         elif tokens is not None:
@@ -393,25 +425,14 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         return summaries, ok_all
 
     def run_gui(self) -> int:
-        values = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
-        if values is None or all(not val for val in values.values()):
-            values = _prompt_for_values(self.tokens, quiet=self.quiet)
-            if values is None:
-                if not self.quiet:
-                    _info("No values captured; aborting.")
-                return 2
-            if not values:
-                if not self.quiet:
-                    _info("No values provided; aborting.")
-                return 2
+        values = self._collect_gui_values()
+        if values is None:
+            return self._abort_gui_run("No values captured; aborting.")
+        if not values:
+            return self._abort_gui_run("No values provided; aborting.")
 
         summaries, ok_all = self._apply_gui_values(values)
-
-        if not self.quiet:
-            _info("Results:")
-            for var, ok, stored in summaries:
-                shown = "<not set>" if stored in {None, "", "<empty>"} else "<hidden>"
-                _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
+        self._report_gui_results(summaries)
 
         if not ok_all:
             if not self.quiet:
@@ -423,6 +444,27 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
                 "effect."
             )
         return 0
+
+    def _collect_gui_values(self) -> dict[str, str] | None:
+        values = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
+        if values is None or all(not val for val in values.values()):
+            return _prompt_for_values(self.tokens, quiet=self.quiet)
+        return values
+
+    def _abort_gui_run(self, message: str) -> int:
+        if not self.quiet:
+            _info(message)
+        return 2
+
+    def _report_gui_results(
+        self, summaries: Sequence[tuple[str, bool, str | None]]
+    ) -> None:
+        if self.quiet:
+            return
+        _info("Results:")
+        for var, ok, stored in summaries:
+            shown = "<not set>" if stored in {None, "", "<empty>"} else "<hidden>"
+            _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
 
 def _open_gui_and_collect(
@@ -439,10 +481,12 @@ def _open_gui_and_collect(
 def _prompt_for_values(
     tokens: Sequence[Token], *, quiet: bool
 ) -> dict[str, str] | None:
-    print("GUI unavailable. Falling back to console prompts.")
-    print(
-        "Provide secrets for each token. Leave blank to skip and keep existing user-scoped values."
-    )
+    if not quiet:
+        print("GUI unavailable. Falling back to console prompts.")
+        print(
+            "Provide secrets for each token. Leave blank to skip and keep existing "
+            "user-scoped values."
+        )
     collected: dict[str, str] = {}
     capture_any = False
     for var, label in tokens:
@@ -450,7 +494,8 @@ def _prompt_for_values(
         try:
             value = getpass.getpass(prompt)
         except (EOFError, KeyboardInterrupt):
-            print("Aborted.")
+            if not quiet:
+                print("Aborted.")
             return None
         if value:
             collected[var] = value
@@ -478,13 +523,29 @@ def _build_gui_parts(
     tokens: Sequence[Token],
     prefill: Mapping[str, str],
 ) -> tuple[TkRoot, dict[str, TkEntry], TkBooleanVar, dict[str, str]]:
+    root, frame = _create_gui_root(tk_mod)
+    show_var = cast("TkBooleanVar", tk_mod.BooleanVar(value=False))
+    entries, next_row = _create_token_rows(tk_mod, frame, tokens, prefill, show_var)
+    result: dict[str, str] = {}
+    _attach_gui_buttons(tk_mod, frame, next_row, entries, result, root)
+    return root, entries, show_var, result
+
+
+def _create_gui_root(tk_mod: ModuleType) -> tuple[TkRoot, TkFrame]:
     root = cast("TkRoot", tk_mod.Tk())
     root.title("Set persistent tokens")
-
     frame = cast("TkFrame", tk_mod.Frame(root, padx=10, pady=10))
     frame.pack(fill="both", expand=True)
+    return root, frame
 
-    show_var = cast("TkBooleanVar", tk_mod.BooleanVar(value=False))
+
+def _create_token_rows(
+    tk_mod: ModuleType,
+    frame: TkFrame,
+    tokens: Sequence[Token],
+    prefill: Mapping[str, str],
+    show_var: TkBooleanVar,
+) -> tuple[dict[str, TkEntry], int]:
     entries: dict[str, TkEntry] = {}
 
     def toggle_show() -> None:
@@ -496,11 +557,11 @@ def _build_gui_parts(
     for var, label_text in tokens:
         label = cast("TkLabel", tk_mod.Label(frame, text=label_text))
         label.grid(row=row, column=0, sticky="w", pady=4)
-        ent = cast("TkEntry", tk_mod.Entry(frame, width=50, show="*"))
+        entry = cast("TkEntry", tk_mod.Entry(frame, width=50, show="*"))
         if var in prefill:
-            ent.insert(0, prefill[var])
-        entries[var] = ent
-        ent.grid(row=row, column=1, sticky="we", pady=4, padx=(6, 0))
+            entry.insert(0, prefill[var])
+        entries[var] = entry
+        entry.grid(row=row, column=1, sticky="we", pady=4, padx=(6, 0))
         frame.grid_columnconfigure(1, weight=1)
         row += 1
 
@@ -511,15 +572,22 @@ def _build_gui_parts(
         ),
     )
     chk.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    row += 1
+    return entries, row + 1
 
-    result: dict[str, str] = {}
 
+def _attach_gui_buttons(
+    tk_mod: ModuleType,
+    frame: TkFrame,
+    row: int,
+    entries: Mapping[str, TkEntry],
+    result: dict[str, str],
+    root: TkRoot,
+) -> None:
     def on_set() -> None:
         missing: list[str] = []
         staged: dict[str, str] = {}
-        for var, ent in entries.items():
-            val = ent.get().strip()
+        for var, entry in entries.items():
+            val = entry.get().strip()
             if not val:
                 missing.append(var)
             else:
@@ -550,8 +618,6 @@ def _build_gui_parts(
         "TkButton", tk_mod.Button(btn_frame, text="Cancel", command=on_cancel)
     )
     cancel_btn.pack(side="left")
-
-    return root, entries, show_var, result
 
 
 def _run_gui_loop(root: TkRoot, result: dict[str, str]) -> dict[str, str] | None:
@@ -590,6 +656,157 @@ def _collect_user_environment(
     return snapshot
 
 
+def _persist_current_for_spec(
+    spec: TokenSpec,
+    token_pairs: Sequence[Token],
+    token_specs: Sequence[TokenSpec],
+    *,
+    quiet: bool,
+    ctx: object | None,
+) -> tuple[dict[str, object], int, int, int]:
+    session_value = os.environ.get(spec.name)
+    reader = x_cls_make_persistent_env_var_x(
+        spec.name,
+        "",
+        quiet=quiet,
+        tokens=token_pairs,
+        token_specs=token_specs,
+        ctx=ctx,
+    )
+    before = reader.get_user_env()
+
+    if not session_value:
+        missing_entry = {
+            "name": spec.name,
+            "label": spec.display_label,
+            "status": "skipped",
+            "attempted": False,
+            "stored": _display_value(spec.name, before),
+            "stored_hash": _hash_value(before),
+            "message": "variable missing from current session",
+            "changed": False,
+        }
+        return missing_entry, 0, 1, 0
+
+    setter = x_cls_make_persistent_env_var_x(
+        spec.name,
+        session_value,
+        quiet=quiet,
+        tokens=token_pairs,
+        token_specs=token_specs,
+        ctx=ctx,
+    )
+    ok = setter.set_user_env()
+    after = setter.get_user_env()
+    entry: dict[str, object] = {
+        "name": spec.name,
+        "label": spec.display_label,
+        "attempted": True,
+        "stored": _display_value(spec.name, after),
+        "stored_hash": _hash_value(after),
+    }
+    if not ok or after != session_value:
+        entry.update(
+            {
+                "status": "failed",
+                "message": "failed to persist value",
+                "changed": False,
+            }
+        )
+        return entry, 0, 0, 1
+
+    changed = before != after
+    entry.update(
+        {
+            "status": "persisted" if changed else "unchanged",
+            "message": "updated" if changed else "already current",
+            "changed": changed,
+        }
+    )
+    return entry, int(changed), 0, 0
+
+
+def _persist_value_for_spec(
+    spec: TokenSpec,
+    provided: str | None,
+    token_pairs: Sequence[Token],
+    token_specs: Sequence[TokenSpec],
+    *,
+    quiet: bool,
+    ctx: object | None,
+) -> tuple[dict[str, object], int, int, int]:
+    reader = x_cls_make_persistent_env_var_x(
+        spec.name,
+        "",
+        quiet=quiet,
+        tokens=token_pairs,
+        token_specs=token_specs,
+        ctx=ctx,
+    )
+    before = reader.get_user_env()
+    entry: dict[str, object] = {
+        "name": spec.name,
+        "label": spec.display_label,
+    }
+
+    if not provided:
+        status = "failed" if spec.required else "skipped"
+        message = (
+            "required value missing" if status == "failed" else "no value provided"
+        )
+        entry.update(
+            {
+                "status": status,
+                "attempted": False,
+                "stored": _display_value(spec.name, before),
+                "stored_hash": _hash_value(before),
+                "message": message,
+                "changed": False,
+            }
+        )
+        modified = 0
+        skipped = int(status == "skipped")
+        failed = int(status == "failed")
+        return entry, modified, skipped, failed
+
+    setter = x_cls_make_persistent_env_var_x(
+        spec.name,
+        provided,
+        quiet=quiet,
+        tokens=token_pairs,
+        token_specs=token_specs,
+        ctx=ctx,
+    )
+    ok = setter.set_user_env()
+    after = setter.get_user_env()
+    entry.update(
+        {
+            "attempted": True,
+            "stored": _display_value(spec.name, after),
+            "stored_hash": _hash_value(after),
+        }
+    )
+    if not ok or after != provided:
+        entry.update(
+            {
+                "status": "failed",
+                "message": "failed to persist value",
+                "changed": False,
+            }
+        )
+        return entry, 0, 0, 1
+
+    changed = before != after
+    entry.update(
+        {
+            "status": "persisted" if changed else "unchanged",
+            "message": "updated" if changed else "already current",
+            "changed": changed,
+        }
+    )
+    return entry, int(changed), 0, 0
+
+
 def _perform_persist_current(
     token_specs: Sequence[TokenSpec],
     *,
@@ -603,85 +820,41 @@ def _perform_persist_current(
     tokens_modified = 0
     tokens_skipped = 0
     tokens_failed = 0
-    messages: list[str] = []
 
     for spec in token_specs:
-        session_value = os.environ.get(spec.name)
-        reader = x_cls_make_persistent_env_var_x(
-            spec.name,
-            "",
+        entry, modified, skipped, failed = _persist_current_for_spec(
+            spec,
+            token_pairs,
+            token_specs,
             quiet=quiet,
-            tokens=token_pairs,
-            token_specs=token_specs,
             ctx=ctx,
         )
-        before = reader.get_user_env()
-
-        if not session_value:
-            results.append(
-                {
-                    "name": spec.name,
-                    "label": spec.display_label,
-                    "status": "skipped",
-                    "attempted": False,
-                    "stored": _display_value(spec.name, before),
-                    "stored_hash": _hash_value(before),
-                    "message": "variable missing from current session",
-                    "changed": False,
-                }
-            )
-            tokens_skipped += 1
-            continue
-
-        setter = x_cls_make_persistent_env_var_x(
-            spec.name,
-            session_value,
-            quiet=quiet,
-            tokens=token_pairs,
-            token_specs=token_specs,
-            ctx=ctx,
-        )
-        ok = setter.set_user_env()
-        after = setter.get_user_env()
-        entry: dict[str, object] = {
-            "name": spec.name,
-            "label": spec.display_label,
-            "attempted": True,
-            "stored": _display_value(spec.name, after),
-            "stored_hash": _hash_value(after),
-        }
-        if not ok or after != session_value:
-            entry["status"] = "failed"
-            entry["message"] = "failed to persist value"
-            entry["changed"] = False
-            tokens_failed += 1
-        else:
-            changed = before != after
-            entry["status"] = "persisted" if changed else "unchanged"
-            entry["message"] = "updated" if changed else "already current"
-            entry["changed"] = changed
-            if changed:
-                tokens_modified += 1
         results.append(entry)
+        tokens_modified += modified
+        tokens_skipped += skipped
+        tokens_failed += failed
 
-    if tokens_failed:
-        exit_code = 1
-    elif tokens_modified:
-        exit_code = 0
-    else:
-        exit_code = 2
+    exit_code = _exit_code_for_current(tokens_modified, tokens_failed)
 
+    messages: list[str] = []
     if tokens_modified:
         messages.append(
-            f"Persisted {tokens_modified} token{'s' if tokens_modified != 1 else ''} from session"
+            _format_token_message(
+                "Persisted {count} token{plural} from session", tokens_modified
+            )
         )
     if tokens_skipped:
         messages.append(
-            f"Skipped {tokens_skipped} token{'s' if tokens_skipped != 1 else ''} (missing session value)"
+            _format_token_message(
+                "Skipped {count} token{plural} (missing session value)",
+                tokens_skipped,
+            )
         )
     if tokens_failed:
         messages.append(
-            f"Failed to persist {tokens_failed} token{'s' if tokens_failed != 1 else ''}"
+            _format_token_message(
+                "Failed to persist {count} token{plural}", tokens_failed
+            )
         )
 
     snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
@@ -720,90 +893,27 @@ def _perform_persist_values(
     token_specs = tuple(token_specs)
     token_pairs = _token_tuples(token_specs)
     results: list[dict[str, object]] = []
-    tokens_modified = 0
-    tokens_skipped = 0
-    tokens_failed = 0
     provided_redacted = {
         name: _display_value(name, value) for name, value in values.items()
     }
 
+    tokens_modified = 0
+    tokens_skipped = 0
+    tokens_failed = 0
+
     for spec in token_specs:
-        provided = values.get(spec.name)
-        reader = x_cls_make_persistent_env_var_x(
-            spec.name,
-            "",
+        entry, modified, skipped, failed = _persist_value_for_spec(
+            spec,
+            values.get(spec.name),
+            token_pairs,
+            token_specs,
             quiet=quiet,
-            tokens=token_pairs,
-            token_specs=token_specs,
             ctx=ctx,
         )
-        before = reader.get_user_env()
-        entry: dict[str, object] = {
-            "name": spec.name,
-            "label": spec.display_label,
-        }
-
-        if not provided:
-            status = "failed" if spec.required else "skipped"
-            if status == "failed":
-                tokens_failed += 1
-            else:
-                tokens_skipped += 1
-            entry.update(
-                {
-                    "status": status,
-                    "attempted": False,
-                    "stored": _display_value(spec.name, before),
-                    "stored_hash": _hash_value(before),
-                    "message": (
-                        "required value missing"
-                        if status == "failed"
-                        else "no value provided"
-                    ),
-                    "changed": False,
-                }
-            )
-            results.append(entry)
-            continue
-
-        setter = x_cls_make_persistent_env_var_x(
-            spec.name,
-            provided,
-            quiet=quiet,
-            tokens=token_pairs,
-            token_specs=token_specs,
-            ctx=ctx,
-        )
-        ok = setter.set_user_env()
-        after = setter.get_user_env()
-        entry.update(
-            {
-                "attempted": True,
-                "stored": _display_value(spec.name, after),
-                "stored_hash": _hash_value(after),
-            }
-        )
-        if not ok or after != provided:
-            entry.update(
-                {
-                    "status": "failed",
-                    "message": "failed to persist value",
-                    "changed": False,
-                }
-            )
-            tokens_failed += 1
-        else:
-            changed = before != after
-            entry.update(
-                {
-                    "status": "persisted" if changed else "unchanged",
-                    "message": "updated" if changed else "already current",
-                    "changed": changed,
-                }
-            )
-            if changed:
-                tokens_modified += 1
         results.append(entry)
+        tokens_modified += modified
+        tokens_skipped += skipped
+        tokens_failed += failed
 
     snapshot_user = _collect_user_environment(token_specs, quiet=quiet, ctx=ctx)
     snapshot: dict[str, object] = {
@@ -818,23 +928,22 @@ def _perform_persist_values(
             for spec in token_specs
         }
 
-    if tokens_failed:
-        exit_code = 1
-    else:
-        exit_code = 0
+    exit_code = _exit_code_for_values(tokens_failed)
 
     messages: list[str] = []
     if tokens_modified:
         messages.append(
-            f"Persisted {tokens_modified} token{'s' if tokens_modified != 1 else ''}"
+            _format_token_message("Persisted {count} token{plural}", tokens_modified)
         )
     if tokens_skipped:
         messages.append(
-            f"Skipped {tokens_skipped} token{'s' if tokens_skipped != 1 else ''}"
+            _format_token_message("Skipped {count} token{plural}", tokens_skipped)
         )
     if tokens_failed:
         messages.append(
-            f"Failed to persist {tokens_failed} token{'s' if tokens_failed != 1 else ''}"
+            _format_token_message(
+                "Failed to persist {count} token{plural}", tokens_failed
+            )
         )
 
     return _RunOutcome(
@@ -981,7 +1090,7 @@ def main_json(
     if notes:
         snapshot.setdefault("notes", notes)
 
-    result = {
+    result: dict[str, object] = {
         "status": "success",
         "schema_version": SCHEMA_VERSION,
         "generated_at": _timestamp(),
