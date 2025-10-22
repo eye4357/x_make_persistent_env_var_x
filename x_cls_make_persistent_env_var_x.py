@@ -575,7 +575,7 @@ def _create_token_rows(
     return entries, row + 1
 
 
-def _attach_gui_buttons(
+def _attach_gui_buttons(  # noqa: PLR0913 - GUI callback wiring requires explicit parameters
     tk_mod: ModuleType,
     frame: TkFrame,
     row: int,
@@ -726,7 +726,7 @@ def _persist_current_for_spec(
     return entry, int(changed), 0, 0
 
 
-def _persist_value_for_spec(
+def _persist_value_for_spec(  # noqa: PLR0913 - persistence flow needs explicit context parameters
     spec: TokenSpec,
     provided: str | None,
     token_pairs: Sequence[Token],

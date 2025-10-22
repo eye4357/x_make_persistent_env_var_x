@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys as _sys
+
 _JSON_VALUE_SCHEMA: dict[str, object] = {
     "type": ["object", "array", "string", "number", "boolean", "null"],
 }
@@ -161,5 +163,8 @@ _ERROR_SCHEMA: dict[str, object] = {
 INPUT_SCHEMA = _INPUT_SCHEMA
 OUTPUT_SCHEMA = _OUTPUT_SCHEMA
 ERROR_SCHEMA = _ERROR_SCHEMA
+
+# Preserve legacy import path "json_contracts" for downstream tooling.
+_sys.modules.setdefault("json_contracts", _sys.modules[__name__])
 
 __all__ = ["ERROR_SCHEMA", "INPUT_SCHEMA", "OUTPUT_SCHEMA"]
