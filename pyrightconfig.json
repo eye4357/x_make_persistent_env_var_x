@@ -8,5 +8,6 @@
                 ".."
             ]
         }
-    ]
+    ],
+    "reportMissingModuleSource": "none"
 }
