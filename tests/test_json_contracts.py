@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 # ruff: noqa: S101 - assertions express expectations in test cases
+import copy
 import json
 import subprocess
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import cast
 
 import pytest
 from x_make_common_x.json_contracts import validate_payload, validate_schema
@@ -19,29 +21,22 @@ from x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x import (
     x_cls_make_persistent_env_var_x,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
-
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "json_contracts"
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
 
 
-@pytest.fixture(scope="module")  # type: ignore[arg-type]
-def sample_input() -> Iterator[dict[str, object]]:
-    with (FIXTURE_DIR / "input.json").open("r", encoding="utf-8") as handle:
-        yield json.load(handle)
+def _load_fixture(name: str) -> dict[str, object]:
+    with (FIXTURE_DIR / f"{name}.json").open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        message = f"Fixture payload must be an object: {name}"
+        raise TypeError(message)
+    return data
 
 
-@pytest.fixture(scope="module")  # type: ignore[arg-type]
-def sample_output() -> Iterator[dict[str, object]]:
-    with (FIXTURE_DIR / "output.json").open("r", encoding="utf-8") as handle:
-        yield json.load(handle)
-
-
-@pytest.fixture(scope="module")  # type: ignore[arg-type]
-def sample_error() -> Iterator[dict[str, object]]:
-    with (FIXTURE_DIR / "error.json").open("r", encoding="utf-8") as handle:
-        yield json.load(handle)
+SAMPLE_INPUT = _load_fixture("input")
+SAMPLE_OUTPUT = _load_fixture("output")
+SAMPLE_ERROR = _load_fixture("error")
 
 
 def _create_fake_run(
@@ -106,14 +101,10 @@ def test_schemas_are_valid() -> None:
         validate_schema(schema)
 
 
-def test_sample_payloads_match_schema(
-    sample_input: dict[str, object],
-    sample_output: dict[str, object],
-    sample_error: dict[str, object],
-) -> None:
-    validate_payload(sample_input, INPUT_SCHEMA)
-    validate_payload(sample_output, OUTPUT_SCHEMA)
-    validate_payload(sample_error, ERROR_SCHEMA)
+def test_sample_payloads_match_schema() -> None:
+    validate_payload(SAMPLE_INPUT, INPUT_SCHEMA)
+    validate_payload(SAMPLE_OUTPUT, OUTPUT_SCHEMA)
+    validate_payload(SAMPLE_ERROR, ERROR_SCHEMA)
 
 
 def test_existing_reports_align_with_schema() -> None:
@@ -124,15 +115,19 @@ def test_existing_reports_align_with_schema() -> None:
         pytest.skip("no persistent env run reports to validate")
     for report_file in report_files:
         with report_file.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        validate_payload(payload, OUTPUT_SCHEMA)
+            payload_obj: object = json.load(handle)
+        if isinstance(payload_obj, Mapping):
+            payload_map = cast("Mapping[str, object]", payload_obj)
+            validate_payload(dict(payload_map), OUTPUT_SCHEMA)
+        else:
+            message = f"Report {report_file.name} must contain a JSON object"
+            raise TypeError(message)
 
 
 def test_main_json_persist_values_success(
-    sample_input: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = json.loads(json.dumps(sample_input))
+    payload = copy.deepcopy(SAMPLE_INPUT)
     user_env: dict[str, str] = {"DEBUG": "0"}
     fake_run = _create_fake_run(user_env)
 
@@ -153,21 +148,24 @@ def test_main_json_persist_values_success(
 
     summary_obj = result.get("summary")
     assert isinstance(summary_obj, dict)
+    summary = cast("dict[str, object]", summary_obj)
     expected_summary = {
         "action": "persist-values",
         "tokens_modified": 2,
         "tokens_failed": 0,
         "exit_code": 0,
     }
-    actual_summary = {key: summary_obj.get(key) for key in expected_summary}
+    actual_summary = {key: summary.get(key) for key in expected_summary}
     assert actual_summary == expected_summary
 
     entries = _entries_by_name(result)
     api_result = entries["API_TOKEN"]
-    assert api_result.get("status") == "persisted"
+    api_status = api_result.get("status")
+    assert api_status == "persisted"
     assert api_result.get("changed") is True
     assert api_result.get("stored") == "<hidden>"
-    assert isinstance(api_result.get("stored_hash"), str)
+    stored_hash = api_result.get("stored_hash")
+    assert isinstance(stored_hash, str)
 
     debug_result = entries["DEBUG"]
     assert debug_result.get("status") == "persisted"
@@ -233,10 +231,15 @@ def test_main_json_persist_current_handles_missing(
     validate_payload(result, OUTPUT_SCHEMA)
     summary_obj = result.get("summary")
     assert isinstance(summary_obj, dict)
-    assert summary_obj.get("tokens_modified") == 1
-    assert summary_obj.get("tokens_skipped") == 1
-    assert summary_obj.get("tokens_failed") == 0
-    assert summary_obj.get("exit_code") == 0
+    summary = cast("dict[str, object]", summary_obj)
+    tokens_modified = summary.get("tokens_modified")
+    tokens_skipped = summary.get("tokens_skipped")
+    tokens_failed = summary.get("tokens_failed")
+    exit_code = summary.get("exit_code")
+    assert tokens_modified == 1
+    assert tokens_skipped == 1
+    assert tokens_failed == 0
+    assert exit_code == 0
 
     results_obj = result.get("results")
     assert isinstance(results_obj, list)
@@ -249,12 +252,18 @@ def test_main_json_persist_current_handles_missing(
             entries[name_value] = entry_obj
     alpha_entry = entries.get("ALPHA")
     assert isinstance(alpha_entry, dict)
-    assert alpha_entry.get("status") in {"persisted", "unchanged"}
+    alpha_status = alpha_entry.get("status")
+    assert alpha_status in {"persisted", "unchanged"}
     beta_entry = entries.get("BETA")
     assert isinstance(beta_entry, dict)
-    assert beta_entry.get("status") == "skipped"
-    assert beta_entry.get("attempted") is False
-    assert beta_entry.get("changed") is False
+    beta_status = beta_entry.get("status")
+    assert beta_status == "skipped"
+    beta_attempted = beta_entry.get("attempted")
+    assert isinstance(beta_attempted, bool)
+    assert beta_attempted is False
+    beta_changed = beta_entry.get("changed")
+    assert isinstance(beta_changed, bool)
+    assert beta_changed is False
 
 
 def test_main_json_reports_validation_errors() -> None:

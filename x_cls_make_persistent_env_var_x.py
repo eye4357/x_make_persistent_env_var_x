@@ -3,21 +3,21 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import importlib
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys as _sys
-import types
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, cast
+from types import ModuleType
+from typing import IO, TYPE_CHECKING, Protocol, TypeVar, cast
 
-from jsonschema import ValidationError
 from x_make_common_x.json_contracts import validate_payload
 
 from x_make_persistent_env_var_x.json_contracts import (
@@ -26,12 +26,25 @@ from x_make_persistent_env_var_x.json_contracts import (
     OUTPUT_SCHEMA,
 )
 
-ModuleType = types.ModuleType
 
-ValidationErrorType: type[Exception] = ValidationError
+class _SchemaValidationError(Exception):
+    message: str
+    path: tuple[object, ...]
+    schema_path: tuple[object, ...]
+
+
+class _JsonSchemaModule(Protocol):
+    ValidationError: type[_SchemaValidationError]
+
+
+def _load_validation_error() -> type[_SchemaValidationError]:
+    module = cast("_JsonSchemaModule", importlib.import_module("jsonschema"))
+    return module.ValidationError
+
+
+ValidationErrorType: type[_SchemaValidationError] = _load_validation_error()
 
 if TYPE_CHECKING:
-    from typing import Protocol
 
     class _TkSupportsGrid(Protocol):
         def grid(self, *args: object, **kwargs: object) -> None: ...
@@ -92,7 +105,7 @@ else:  # pragma: no cover - runtime fallback when tkinter unavailable
 
 _LOGGER = logging.getLogger("x_make")
 
-_tk_runtime: types.ModuleType | None
+_tk_runtime: ModuleType | None
 try:
     import tkinter as tk
 except (ImportError, OSError, RuntimeError):
@@ -599,7 +612,19 @@ def _attach_gui_buttons(  # noqa: PLR0913 - GUI callback wiring requires explici
             )
             messagebox = getattr(tk_mod, "messagebox", None)
             if messagebox is not None:
-                _safe_call(lambda: messagebox.showerror("Tokens required", msg))
+                show_error_obj = getattr(messagebox, "showerror", None)
+                typed_show_error = cast(
+                    "Callable[[str, str], object] | None", show_error_obj
+                )
+
+                if typed_show_error is not None:
+
+                    def _show_error() -> None:
+                        typed_show_error("Tokens required", msg)
+
+                    _safe_call(_show_error)
+                else:
+                    _error(msg)
             else:
                 _error(msg)
             return
@@ -1015,14 +1040,15 @@ def main_json(
 ) -> dict[str, object]:
     try:
         validate_payload(payload, INPUT_SCHEMA)
-    except ValidationError as exc:
+    except ValidationErrorType as exc:
+        error = exc
         return _failure_payload(
             "input payload failed validation",
             exit_code=2,
             details={
-                "error": exc.message,
-                "path": [str(part) for part in exc.path],
-                "schema_path": [str(part) for part in exc.schema_path],
+                "error": error.message,
+                "path": [str(part) for part in error.path],
+                "schema_path": [str(part) for part in error.schema_path],
             },
         )
 
@@ -1102,14 +1128,15 @@ def main_json(
 
     try:
         validate_payload(result, OUTPUT_SCHEMA)
-    except ValidationError as exc:
+    except ValidationErrorType as exc:
+        error = exc
         return _failure_payload(
             "generated output failed schema validation",
             exit_code=1,
             details={
-                "error": exc.message,
-                "path": [str(part) for part in exc.path],
-                "schema_path": [str(part) for part in exc.schema_path],
+                "error": error.message,
+                "path": [str(part) for part in error.path],
+                "schema_path": [str(part) for part in error.schema_path],
             },
         )
 
@@ -1117,10 +1144,18 @@ def main_json(
 
 
 def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
+    def _load_stream(stream: IO[str]) -> Mapping[str, object]:
+        payload_obj: object = json.load(stream)
+        if not isinstance(payload_obj, Mapping):
+            message = "JSON payload must be a mapping"
+            raise TypeError(message)
+        typed_payload = cast("Mapping[str, object]", payload_obj)
+        return dict(typed_payload)
+
     if file_path:
         with Path(file_path).open("r", encoding="utf-8") as handle:
-            return cast("Mapping[str, object]", json.load(handle))
-    return cast("Mapping[str, object]", json.load(_sys.stdin))
+            return _load_stream(handle)
+    return _load_stream(_sys.stdin)
 
 
 def _run_json_cli(args: Sequence[str]) -> None:
