@@ -15,8 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType
-from typing import IO, TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import IO, TYPE_CHECKING, Protocol, TypeGuard, TypeVar, cast
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -45,6 +44,7 @@ def _load_validation_error() -> type[_SchemaValidationError]:
 ValidationErrorType: type[_SchemaValidationError] = _load_validation_error()
 
 if TYPE_CHECKING:
+    from types import ModuleType
 
     class _TkSupportsGrid(Protocol):
         def grid(self, *args: object, **kwargs: object) -> None: ...
@@ -128,6 +128,31 @@ def _safe_call(action: Callable[[], T]) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return True
+
+
+def _is_show_error(candidate: object | None) -> TypeGuard[Callable[[str, str], object]]:
+    return callable(candidate)
+
+
+def _resolve_show_error(messagebox_obj: object) -> Callable[[str, str], object] | None:
+    candidate: object | None = getattr(messagebox_obj, "showerror", None)
+    if _is_show_error(candidate):
+        return candidate
+    return None
+
+
+def _show_messagebox_error(tk_mod: ModuleType, title: str, message: str) -> bool:
+    messagebox_obj: object | None = getattr(tk_mod, "messagebox", None)
+    if messagebox_obj is None:
+        return False
+    show_error = _resolve_show_error(messagebox_obj)
+    if show_error is None:
+        return False
+
+    def _emit() -> object:
+        return show_error(title, message)
+
+    return _safe_call(_emit)
 
 
 def _info(*args: object) -> None:
@@ -610,22 +635,7 @@ def _attach_gui_buttons(  # noqa: PLR0913 - GUI callback wiring requires explici
                 "Provide values for all tokens before continuing.\nMissing: "
                 + ", ".join(missing)
             )
-            messagebox = getattr(tk_mod, "messagebox", None)
-            if messagebox is not None:
-                show_error_obj = getattr(messagebox, "showerror", None)
-                typed_show_error = cast(
-                    "Callable[[str, str], object] | None", show_error_obj
-                )
-
-                if typed_show_error is not None:
-
-                    def _show_error() -> None:
-                        typed_show_error("Tokens required", msg)
-
-                    _safe_call(_show_error)
-                else:
-                    _error(msg)
-            else:
+            if not _show_messagebox_error(tk_mod, "Tokens required", msg):
                 _error(msg)
             return
         result.update(staged)
@@ -1143,8 +1153,8 @@ def main_json(
     return result
 
 
-def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
-    def _load_stream(stream: IO[str]) -> Mapping[str, object]:
+def _load_json_payload(file_path: str | None) -> dict[str, object]:
+    def _load_stream(stream: IO[str]) -> dict[str, object]:
         payload_obj: object = json.load(stream)
         if not isinstance(payload_obj, Mapping):
             message = "JSON payload must be a mapping"
@@ -1174,10 +1184,15 @@ def _run_json_cli(args: Sequence[str]) -> None:
     )
     parsed = parser.parse_args(args)
 
-    if not (parsed.json or parsed.json_file):
+    namespace = cast("Mapping[str, object]", vars(parsed))
+    read_from_stdin = bool(namespace.get("json", False))
+    json_file_value = namespace.get("json_file")
+    json_file = json_file_value if isinstance(json_file_value, str) else None
+
+    if not (read_from_stdin or json_file):
         parser.error("JSON input required. Use --json for stdin or --json-file <path>.")
 
-    payload = _load_json_payload(parsed.json_file if parsed.json_file else None)
+    payload = _load_json_payload(None if read_from_stdin else json_file)
     result = main_json(payload)
     json.dump(result, _sys.stdout, indent=2)
     _sys.stdout.write("\n")

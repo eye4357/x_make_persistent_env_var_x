@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# ruff: noqa: S101 - assertions express expectations in test cases
+# ruff: noqa: S101,PLR0915 - assertions express expectations in test cases, long test helpers acceptable
 import copy
 import json
 import subprocess
@@ -27,11 +27,14 @@ REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
 
 def _load_fixture(name: str) -> dict[str, object]:
     with (FIXTURE_DIR / f"{name}.json").open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    if not isinstance(data, dict):
+        payload_obj: object = json.load(handle)
+    if not isinstance(payload_obj, dict):
         message = f"Fixture payload must be an object: {name}"
         raise TypeError(message)
-    return data
+    if not all(isinstance(key, str) for key in payload_obj):
+        message = f"Fixture keys must be strings: {name}"
+        raise TypeError(message)
+    return cast("dict[str, object]", payload_obj)
 
 
 SAMPLE_INPUT = _load_fixture("input")
