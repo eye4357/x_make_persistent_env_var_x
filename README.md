@@ -5,20 +5,25 @@ This vault locks down environment variables so the lab never loses a credential 
 ## Mission Log
 - Inspect, create, update, and purge environment variables across user and system scopes.
 - Persist changes with JSON ledgers that the orchestrator and Change Control teams can audit.
-- Offer both CLI and Tkinter surfaces so operators handle secrets the way the situation demands.
+- Offer both JSON CLI and PySide6 control dialog surfaces so operators handle secrets the way the situation demands.
 - Guard against drift with deterministic logging, registry safeguards, and typed interfaces.
+- Default vault profile now tracks `SLACK_TOKEN` alongside the PyPI and GitHub credentials so the Slack dump-and-reset runner never launches without a verified API key.
 
 ## Instrumentation
 - Python 3.11 or newer.
 - Ruff, Black, MyPy, Pyright, pytest for hygiene.
-- Tkinter (bundled on Windows) when using the GUI flows.
+- PySide6 when using the GUI flows.
 
 ## Operating Procedure
 1. `python -m venv .venv`
 2. `\.venv\Scripts\Activate.ps1`
 3. `python -m pip install --upgrade pip`
 4. `pip install -r requirements.txt`
-5. `python -m x_make_persistent_env_var_x`
+5. `python -m x_make_persistent_env_var_x --json --json-file payload.json`
+
+Runtime options:
+- `--launch-gui [--quiet]` opens the PySide6 dialog without touching JSON payloads.
+- `--json` reads payloads from stdin; pair with `--json-file <path>` to load evidence from disk. Missing `command` fields are auto-injected to satisfy schema validation before invoking the JSON core.
 
 Use the CLI to script changes or launch the GUI to edit variables interactively. Export JSON evidence after every session and stash it beside the orchestrator summary.
 
@@ -56,7 +61,7 @@ I crafted this vault alone. Registry tuning, PowerShell glue, Python interfaces,
 - Budget: USD 95k–120k plus ongoing compliance upkeep.
 
 ## Technical Footprint
-- Language Backbone: Python 3.11+, `tkinter`, `subprocess`, `json`, `pathlib`.
+- Language Backbone: Python 3.11+, PySide6, `subprocess`, `json`, `pathlib`.
 - Tooling Mesh: PowerShell integration, Windows registry APIs, shared logging utilities from `x_make_common_x`.
 - Quality Net: Ruff, Black, MyPy, Pyright, pytest, manual GUI regression passes.
 - Outputs: JSON environment ledgers, orchestrator hooks for credential verification, Change Control attachments for every persisted secret.

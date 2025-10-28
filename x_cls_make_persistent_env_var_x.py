@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import hashlib
 import importlib
 import json
@@ -15,7 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol, TypeGuard, TypeVar, cast
+from typing import IO, Protocol, TypeVar, cast
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -43,75 +42,7 @@ def _load_validation_error() -> type[_SchemaValidationError]:
 
 ValidationErrorType: type[_SchemaValidationError] = _load_validation_error()
 
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    class _TkSupportsGrid(Protocol):
-        def grid(self, *args: object, **kwargs: object) -> None: ...
-
-    class _TkSupportsPack(Protocol):
-        def pack(self, *args: object, **kwargs: object) -> None: ...
-
-    class TkRoot(Protocol):
-        def title(self, text: str) -> None: ...
-
-        def destroy(self) -> None: ...
-
-        def update_idletasks(self) -> None: ...
-
-        def winfo_width(self) -> int: ...
-
-        def winfo_height(self) -> int: ...
-
-        def winfo_screenwidth(self) -> int: ...
-
-        def winfo_screenheight(self) -> int: ...
-
-        def geometry(self, geometry: str) -> None: ...
-
-        def mainloop(self) -> None: ...
-
-    class TkEntry(_TkSupportsGrid, Protocol):
-        def config(self, **kwargs: object) -> None: ...
-
-        def insert(self, index: int, string: str) -> None: ...
-
-        def get(self) -> str: ...
-
-    class TkBooleanVar(Protocol):
-        def get(self) -> bool | int: ...
-
-    class TkFrame(_TkSupportsPack, _TkSupportsGrid, Protocol):
-        def grid_columnconfigure(self, index: int, weight: int) -> None: ...
-
-    class TkLabel(_TkSupportsGrid, Protocol):
-        pass
-
-    class TkButton(_TkSupportsPack, Protocol):
-        pass
-
-    class TkCheckbutton(_TkSupportsGrid, Protocol):
-        pass
-
-else:  # pragma: no cover - runtime fallback when tkinter unavailable
-    _tk_fallback = object
-    TkRoot = _tk_fallback
-    TkEntry = _tk_fallback
-    TkBooleanVar = _tk_fallback
-    TkFrame = _tk_fallback
-    TkLabel = _tk_fallback
-    TkButton = _tk_fallback
-    TkCheckbutton = _tk_fallback
-
 _LOGGER = logging.getLogger("x_make")
-
-_tk_runtime: ModuleType | None
-try:
-    import tkinter as tk
-except (ImportError, OSError, RuntimeError):
-    _tk_runtime = None
-else:
-    _tk_runtime = tk
 
 T = TypeVar("T")
 
@@ -128,31 +59,6 @@ def _safe_call(action: Callable[[], T]) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return True
-
-
-def _is_show_error(candidate: object | None) -> TypeGuard[Callable[[str, str], object]]:
-    return callable(candidate)
-
-
-def _resolve_show_error(messagebox_obj: object) -> Callable[[str, str], object] | None:
-    candidate: object | None = getattr(messagebox_obj, "showerror", None)
-    if _is_show_error(candidate):
-        return candidate
-    return None
-
-
-def _show_messagebox_error(tk_mod: ModuleType, title: str, message: str) -> bool:
-    messagebox_obj: object | None = getattr(tk_mod, "messagebox", None)
-    if messagebox_obj is None:
-        return False
-    show_error = _resolve_show_error(messagebox_obj)
-    if show_error is None:
-        return False
-
-    def _emit() -> object:
-        return show_error(title, message)
-
-    return _safe_call(_emit)
 
 
 def _info(*args: object) -> None:
@@ -193,6 +99,7 @@ _DEFAULT_TOKENS: tuple[Token, ...] = (
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
     ("PYPI_API_TOKEN", "PyPI API Token"),
     ("GITHUB_TOKEN", "GitHub Token"),
+    ("SLACK_TOKEN", "Slack API Token"),
 )
 
 SCHEMA_VERSION = "x_make_persistent_env_var_x.run/1.0"
@@ -436,113 +343,6 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
             _error(f"{var}: failed to persist to User environment")
         return False
 
-    def apply_gui_values(
-        self, values: Mapping[str, str]
-    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
-        return self._apply_gui_values(values)
-
-    def _apply_gui_values(
-        self, values: Mapping[str, str]
-    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
-        summaries: list[tuple[str, bool, str | None]] = []
-        ok_all = True
-        for var, _label in self.tokens:
-            val = values.get(var, "")
-            if not val:
-                summaries.append((var, False, "<empty>"))
-                ok_all = False
-                continue
-            obj = type(self)(
-                var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
-            )
-            ok = obj.set_user_env()
-            stored = obj.get_user_env()
-            summaries.append((var, ok, stored))
-            if not (ok and stored == val):
-                ok_all = False
-        return summaries, ok_all
-
-    def run_gui(self) -> int:
-        values = self._collect_gui_values()
-        if values is None:
-            return self._abort_gui_run("No values captured; aborting.")
-        if not values:
-            return self._abort_gui_run("No values provided; aborting.")
-
-        summaries, ok_all = self._apply_gui_values(values)
-        self._report_gui_results(summaries)
-
-        if not ok_all:
-            if not self.quiet:
-                _info("Some values were not set correctly.")
-            return 1
-        if not self.quiet:
-            _info(
-                "All values set. Open a NEW PowerShell window for changes to take "
-                "effect."
-            )
-        return 0
-
-    def _collect_gui_values(self) -> dict[str, str] | None:
-        values = _open_gui_and_collect(self.tokens, ctx=self._ctx, quiet=self.quiet)
-        if values is None or all(not val for val in values.values()):
-            return _prompt_for_values(self.tokens, quiet=self.quiet)
-        return values
-
-    def _abort_gui_run(self, message: str) -> int:
-        if not self.quiet:
-            _info(message)
-        return 2
-
-    def _report_gui_results(
-        self, summaries: Sequence[tuple[str, bool, str | None]]
-    ) -> None:
-        if self.quiet:
-            return
-        _info("Results:")
-        for var, ok, stored in summaries:
-            shown = "<not set>" if stored in {None, "", "<empty>"} else "<hidden>"
-            _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
-
-
-def _open_gui_and_collect(
-    tokens: Sequence[Token], *, ctx: object | None, quiet: bool
-) -> dict[str, str] | None:
-    if _tk_runtime is None:
-        return None
-
-    prefill = _collect_prefill(tokens, ctx=ctx, quiet=quiet)
-    root, _entries, _show_var, result = _build_gui_parts(_tk_runtime, tokens, prefill)
-    return _run_gui_loop(root, result)
-
-
-def _prompt_for_values(
-    tokens: Sequence[Token], *, quiet: bool
-) -> dict[str, str] | None:
-    if not quiet:
-        print("GUI unavailable. Falling back to console prompts.")
-        print(
-            "Provide secrets for each token. Leave blank to skip and keep existing "
-            "user-scoped values."
-        )
-    collected: dict[str, str] = {}
-    capture_any = False
-    for var, label in tokens:
-        prompt = f"{label} ({var})?: "
-        try:
-            value = getpass.getpass(prompt)
-        except (EOFError, KeyboardInterrupt):
-            if not quiet:
-                print("Aborted.")
-            return None
-        if value:
-            collected[var] = value
-            capture_any = True
-    if not capture_any:
-        return {}
-    return collected
-
-
 def _collect_prefill(
     tokens: Sequence[Token], *, ctx: object | None, quiet: bool
 ) -> dict[str, str]:
@@ -554,120 +354,6 @@ def _collect_prefill(
         if cur:
             prefill[var] = cur
     return prefill
-
-
-def _build_gui_parts(
-    tk_mod: ModuleType,
-    tokens: Sequence[Token],
-    prefill: Mapping[str, str],
-) -> tuple[TkRoot, dict[str, TkEntry], TkBooleanVar, dict[str, str]]:
-    root, frame = _create_gui_root(tk_mod)
-    show_var = cast("TkBooleanVar", tk_mod.BooleanVar(value=False))
-    entries, next_row = _create_token_rows(tk_mod, frame, tokens, prefill, show_var)
-    result: dict[str, str] = {}
-    _attach_gui_buttons(tk_mod, frame, next_row, entries, result, root)
-    return root, entries, show_var, result
-
-
-def _create_gui_root(tk_mod: ModuleType) -> tuple[TkRoot, TkFrame]:
-    root = cast("TkRoot", tk_mod.Tk())
-    root.title("Set persistent tokens")
-    frame = cast("TkFrame", tk_mod.Frame(root, padx=10, pady=10))
-    frame.pack(fill="both", expand=True)
-    return root, frame
-
-
-def _create_token_rows(
-    tk_mod: ModuleType,
-    frame: TkFrame,
-    tokens: Sequence[Token],
-    prefill: Mapping[str, str],
-    show_var: TkBooleanVar,
-) -> tuple[dict[str, TkEntry], int]:
-    entries: dict[str, TkEntry] = {}
-
-    def toggle_show() -> None:
-        ch = "" if bool(show_var.get()) else "*"
-        for ent in entries.values():
-            ent.config(show=ch)
-
-    row = 0
-    for var, label_text in tokens:
-        label = cast("TkLabel", tk_mod.Label(frame, text=label_text))
-        label.grid(row=row, column=0, sticky="w", pady=4)
-        entry = cast("TkEntry", tk_mod.Entry(frame, width=50, show="*"))
-        if var in prefill:
-            entry.insert(0, prefill[var])
-        entries[var] = entry
-        entry.grid(row=row, column=1, sticky="we", pady=4, padx=(6, 0))
-        frame.grid_columnconfigure(1, weight=1)
-        row += 1
-
-    chk = cast(
-        "TkCheckbutton",
-        tk_mod.Checkbutton(
-            frame, text="Show values", variable=show_var, command=toggle_show
-        ),
-    )
-    chk.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    return entries, row + 1
-
-
-def _attach_gui_buttons(  # noqa: PLR0913 - GUI callback wiring requires explicit parameters
-    tk_mod: ModuleType,
-    frame: TkFrame,
-    row: int,
-    entries: Mapping[str, TkEntry],
-    result: dict[str, str],
-    root: TkRoot,
-) -> None:
-    def on_set() -> None:
-        missing: list[str] = []
-        staged: dict[str, str] = {}
-        for var, entry in entries.items():
-            val = entry.get().strip()
-            if not val:
-                missing.append(var)
-            else:
-                staged[var] = val
-        if missing:
-            msg = (
-                "Provide values for all tokens before continuing.\nMissing: "
-                + ", ".join(missing)
-            )
-            if not _show_messagebox_error(tk_mod, "Tokens required", msg):
-                _error(msg)
-            return
-        result.update(staged)
-        root.destroy()
-
-    def on_cancel() -> None:
-        root.destroy()
-        result.clear()
-
-    btn_frame = cast("TkFrame", tk_mod.Frame(frame))
-    btn_frame.grid(row=row, column=0, columnspan=2, pady=(10, 0))
-    set_btn = cast("TkButton", tk_mod.Button(btn_frame, text="Set", command=on_set))
-    set_btn.pack(side="left", padx=(0, 6))
-    cancel_btn = cast(
-        "TkButton", tk_mod.Button(btn_frame, text="Cancel", command=on_cancel)
-    )
-    cancel_btn.pack(side="left")
-
-
-def _run_gui_loop(root: TkRoot, result: dict[str, str]) -> dict[str, str] | None:
-    if not _safe_call(root.update_idletasks):
-        return None
-    w = root.winfo_width()
-    h = root.winfo_height()
-    ws = root.winfo_screenwidth()
-    hs = root.winfo_screenheight()
-    x = (ws // 2) - (w // 2)
-    y = (hs // 2) - (h // 2)
-    _safe_call(lambda: root.geometry(f"+{x}+{y}"))
-    if not _safe_call(root.mainloop):
-        return None
-    return result if result else None
 
 
 def _collect_user_environment(
@@ -1168,38 +854,79 @@ def _load_json_payload(file_path: str | None) -> dict[str, object]:
     return _load_stream(_sys.stdin)
 
 
-def _run_json_cli(args: Sequence[str]) -> None:
+def _run_cli(args: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="x_make_persistent_env_var_x JSON runner"
+        description="x_make_persistent_env_var_x runtime dispatcher"
+    )
+    parser.add_argument(
+        "--launch-gui",
+        action="store_true",
+        help="Launch the PySide6 dialog instead of processing JSON payloads.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Read JSON payload from stdin",
+        help="Read JSON payload from stdin.",
     )
     parser.add_argument(
         "--json-file",
         type=str,
-        help="Path to JSON payload file",
+        help="Path to JSON payload file.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress informational logging when launching the GUI.",
     )
     parsed = parser.parse_args(args)
 
     namespace = cast("Mapping[str, object]", vars(parsed))
+    launch_gui = bool(namespace.get("launch_gui", False))
     read_from_stdin = bool(namespace.get("json", False))
     json_file_value = namespace.get("json_file")
     json_file = json_file_value if isinstance(json_file_value, str) else None
+    quiet = bool(namespace.get("quiet", False))
+
+    if launch_gui and (read_from_stdin or json_file):
+        parser.error("--launch-gui cannot be combined with JSON input flags.")
+
+    if launch_gui:
+        from .x_cls_make_persistent_env_var_gui_x import (
+            x_cls_make_persistent_env_var_gui_x,
+        )
+
+        runner = x_cls_make_persistent_env_var_gui_x(quiet=quiet)
+        try:
+            return runner.run_gui()
+        except RuntimeError as exc:  # Handles missing PySide6 dependencies.
+            _error(str(exc))
+            return 1
 
     if not (read_from_stdin or json_file):
         parser.error("JSON input required. Use --json for stdin or --json-file <path>.")
 
     payload = _load_json_payload(None if read_from_stdin else json_file)
+    payload.setdefault("command", "x_make_persistent_env_var_x")
     result = main_json(payload)
     json.dump(result, _sys.stdout, indent=2)
     _sys.stdout.write("\n")
+
+    if result.get("status") == "success":
+        summary = result.get("summary")
+        if isinstance(summary, Mapping):
+            exit_code_obj = summary.get("exit_code")
+            if isinstance(exit_code_obj, int):
+                return exit_code_obj
+        return 0
+
+    failure_exit_obj = result.get("exit_code")
+    if isinstance(failure_exit_obj, int):
+        return failure_exit_obj
+    return 1
 
 
 __all__ = ["main_json", "x_cls_make_persistent_env_var_x"]
 
 
 if __name__ == "__main__":
-    _run_json_cli(_sys.argv[1:])
+    _sys.exit(_run_cli(_sys.argv[1:]))

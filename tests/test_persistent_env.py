@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping
 
 from x_make_persistent_env_var_x import (
     x_cls_make_persistent_env_var_x as module,
@@ -17,22 +17,6 @@ x_cls_make_persistent_env_var_x = module.x_cls_make_persistent_env_var_x
 
 class TryEmit(Protocol):
     def __call__(self, *emitters: Callable[[], None]) -> None: ...
-
-
-class OpenGuiHook(Protocol):
-    def __call__(
-        self,
-        tokens: Sequence[tuple[str, str]],
-        *,
-        ctx: object | None,
-        quiet: bool,
-    ) -> dict[str, str] | None: ...
-
-
-class PromptHook(Protocol):
-    def __call__(
-        self, tokens: Sequence[tuple[str, str]], *, quiet: bool
-    ) -> dict[str, str] | None: ...
 
 
 class ExpectationFailedError(AssertionError):
@@ -148,62 +132,66 @@ def test_persist_current_skips_missing_variables() -> None:
     )
 
 
-def test_apply_gui_values_reports_results() -> None:
-    stored_values: dict[str, str] = {}
-    tokens: list[tuple[str, str]] = [("ALPHA", "Alpha"), ("BETA", "Beta")]
+def test_main_json_persist_values_success() -> None:
+    state: dict[str, str] = {}
 
-    class Harness(x_cls_make_persistent_env_var_x):
-        def set_user_env(self) -> bool:
-            stored_values[self.var] = self.value
-            return True
+    def fake_run(command: str) -> subprocess.CompletedProcess[str]:
+        parts = command.split('"')
+        if "SetEnvironmentVariable" in command:
+            state[parts[1]] = parts[3]
+            return subprocess.CompletedProcess(
+                ["powershell", "-Command", command],
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+        if "GetEnvironmentVariable" in command:
+            value = state.get(parts[1], "")
+            return subprocess.CompletedProcess(
+                ["powershell", "-Command", command],
+                returncode=0,
+                stdout=value,
+                stderr="",
+            )
+        unexpected = f"Unexpected command: {command}"
+        raise AssertionError(unexpected)
 
-        def get_user_env(self) -> str | None:
-            return stored_values.get(self.var)
+    original = module.x_cls_make_persistent_env_var_x.run_powershell
+    module.x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)
+    try:
+        payload = {
+            "command": "x_make_persistent_env_var_x",
+            "parameters": {
+                "action": "persist-values",
+                "tokens": [
+                    {"name": "ALPHA", "label": "Alpha", "required": True},
+                    {"name": "BETA", "label": "Beta", "required": False},
+                ],
+                "values": {"ALPHA": "value-alpha", "BETA": "value-beta"},
+                "include_existing": True,
+            }
+        }
+        result = module.main_json(payload)
+    finally:
+        module.x_cls_make_persistent_env_var_x.run_powershell = original
 
-    values: dict[str, str] = {"ALPHA": "top-secret", "BETA": ""}
-
-    summaries, ok_all = Harness(tokens=tokens, quiet=True).apply_gui_values(values)
-
-    expect(not ok_all, "apply_gui_values should report incomplete application")
-    expect_equal(
-        summaries,
-        [("ALPHA", True, "top-secret"), ("BETA", False, "<empty>")],
-        label="apply_gui_values summaries",
-    )
+    expect_equal(result.get("status"), "success", label="result status")
+    summary = cast("dict[str, object]", result.get("summary", {}))
+    exit_code = summary.get("exit_code")
+    expect_equal(exit_code, 0, label="summary exit_code")
+    expect_equal(state.get("ALPHA"), "value-alpha", label="persisted ALPHA")
+    expect_equal(state.get("BETA"), "value-beta", label="persisted BETA")
 
 
-def test_run_gui_uses_instance_tokens() -> None:
-    tokens: list[tuple[str, str]] = [("CUSTOM", "Custom")]
-    inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
+def test_main_json_invalid_payload_returns_failure() -> None:
+    payload = {
+        "command": "x_make_persistent_env_var_x",
+        "parameters": {"action": "unsupported"},
+    }
+    result = module.main_json(payload)
 
-    call_log: list[tuple[tuple[tuple[str, str], ...], dict[str, object]]] = []
-
-    def fake_open_gui(
-        tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
-    ) -> dict[str, str] | None:
-        call_log.append((tuple(tokens), {"ctx": ctx, "quiet": quiet}))
-        return None
-
-    def fake_prompt(
-        tokens: Sequence[tuple[str, str]], *, quiet: bool
-    ) -> dict[str, str] | None:
-        prompt_calls.append((tuple(tokens), quiet))
-        return {}
-
-    prompt_calls: list[tuple[tuple[tuple[str, str], ...], bool]] = []
-
-    with override_open_gui(fake_open_gui), override_prompt_for_values(fake_prompt):
-        exit_code = inst.run_gui()
-
-    expect(
-        exit_code == MISSING_EXIT_CODE,
-        "run_gui should return 2 when GUI is cancelled",
-    )
-    expect(call_log, "open_gui should be invoked")
-    recorded_tokens, kwargs = call_log[0]
-    expect_equal(recorded_tokens, tuple(tokens), label="open_gui positional tokens")
-    expect_equal(kwargs, {"ctx": None, "quiet": True}, label="open_gui kwargs")
-    expect_equal(len(prompt_calls), 1, label="prompt_for_values invocation count")
+    expect_equal(result.get("status"), "failure", label="failure status")
+    expect_equal(result.get("exit_code"), 2, label="failure exit code")
 
 
 @contextmanager
@@ -216,37 +204,3 @@ def override_environ(values: Mapping[str, str]) -> Iterator[None]:
     finally:
         os.environ.clear()
         os.environ.update(original)
-
-
-@contextmanager
-def override_open_gui(replacer: OpenGuiHook) -> Iterator[None]:
-    open_gui_attr = "_open_gui_and_collect"
-    original = cast("OpenGuiHook", getattr(module, open_gui_attr))
-
-    def recorder(
-        tokens: Sequence[tuple[str, str]], *, ctx: object | None, quiet: bool
-    ) -> dict[str, str] | None:
-        return replacer(tokens, ctx=ctx, quiet=quiet)
-
-    setattr(module, open_gui_attr, recorder)
-    try:
-        yield
-    finally:
-        setattr(module, open_gui_attr, original)
-
-
-@contextmanager
-def override_prompt_for_values(replacer: PromptHook) -> Iterator[None]:
-    prompt_attr = "_prompt_for_values"
-    original = cast("PromptHook", getattr(module, prompt_attr))
-
-    def wrapper(
-        tokens: Sequence[tuple[str, str]], *, quiet: bool
-    ) -> dict[str, str] | None:
-        return replacer(tokens, quiet=quiet)
-
-    setattr(module, prompt_attr, wrapper)
-    try:
-        yield
-    finally:
-        setattr(module, prompt_attr, original)

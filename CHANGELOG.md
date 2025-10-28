@@ -2,6 +2,13 @@
 
 I catalogue every substantive adjustment to this environment vault here. Entries obey [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so compliance teams can tie configuration evidence to specific releases.
 
+## [Unreleased]
+### Changed
+- Retired the legacy Tkinter interface so the package operates strictly as a JSON-in/JSON-out service.
+- Added a PySide6-driven credential dialog (`x_cls_make_persistent_env_var_gui_x`) that shells the JSON workflow for orchestrator launches.
+- Hardened the CLI dispatcher: new `--launch-gui` flag, explicit JSON exit codes, and automatic injection of the `command` field for schema compliance.
+- Expanded test coverage with a CLI dispatch harness that mocks the PySide6 surface to keep GUI verification in CI.
+
 ## [0.20.4] - 2025-10-15
 ### Changed
 - README aligned with the Road to 0.20.4 release, outlining how environment exports back the upcoming Kanban Environment Provisioning column.
