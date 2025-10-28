@@ -1,43 +1,33 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from io import StringIO
+from typing import Any, cast
 
-from x_make_persistent_env_var_x import (
-    x_cls_make_persistent_env_var_x as module,
-)
+import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
 
+_run_cli = cast("Callable[[list[str]], int]", module._run_cli)
 
-def test_launch_gui_flag_invokes_pyside_runner() -> None:
-    records: list[str] = []
+def test_launch_gui_flag_invokes_tk_runner() -> None:
+    records: list[tuple[str, Any]] = []
 
-    class FakeGui:
-        def __init__(self, *, quiet: bool = False, ctx: object | None = None) -> None:
-            records.append(f"init:{quiet}")
-            self._quiet = quiet
-            self._ctx = ctx
+    original_run_gui = module.x_cls_make_persistent_env_var_x.run_gui
 
-        def run_gui(self) -> int:
-            records.append("run")
-            return 7
+    def fake_run(self: object) -> int:
+        quiet = cast("bool", getattr(self, "quiet", False))
+        records.append(("run", quiet))
+        return 5
 
-    try:
-        from x_make_persistent_env_var_x import (
-            x_cls_make_persistent_env_var_gui_x as gui_module,
-        )
-    except ImportError as exc:  # pragma: no cover - module is part of package
-        raise AssertionError("GUI module missing") from exc
-
-    original = gui_module.x_cls_make_persistent_env_var_gui_x
-    gui_module.x_cls_make_persistent_env_var_gui_x = FakeGui
+    module.x_cls_make_persistent_env_var_x.run_gui = fake_run  # type: ignore[assignment]
 
     stdout_original = sys.stdout
     sys.stdout = StringIO()
     try:
-        exit_code = module._run_cli(["--launch-gui", "--quiet"])
+        exit_code = _run_cli(["--launch-gui", "--quiet"])
     finally:
-        gui_module.x_cls_make_persistent_env_var_gui_x = original
+        module.x_cls_make_persistent_env_var_x.run_gui = original_run_gui  # type: ignore[assignment]
         sys.stdout = stdout_original
 
-    assert exit_code == 7
-    assert records == ["init:True", "run"]
+    assert exit_code == 5
+    assert records == [("run", True)]

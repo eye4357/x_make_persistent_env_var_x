@@ -14,7 +14,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Protocol, TypeVar, cast
+from typing import IO, Any, Protocol, TypeVar, cast
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -273,6 +273,259 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         self.tokens = _token_tuples(resolved_specs)
         self._ctx = ctx
         self.token_specs = resolved_specs
+
+    def run_gui(self) -> int:
+        """Launch the Tkinter token dialog using the current token specs."""
+
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+        except ModuleNotFoundError as exc:  # pragma: no cover - platform quirk
+            message = (
+                "Tkinter is required for the environment vault dialog. "
+                "Enable the Tk components for your Python installation."
+            )
+            raise RuntimeError(message) from exc
+
+        prefill = _collect_prefill(self.tokens, ctx=self._ctx, quiet=self.quiet)
+        exit_state: dict[str, int] = {"code": 2}
+
+        root = tk.Tk()
+        root.title("Persist Environment Tokens")
+        root.geometry("460x320")
+        root.resizable(False, False)
+
+        frame = tk.Frame(root, padx=16, pady=16)
+        frame.pack(fill="both", expand=True)
+
+        entries: dict[str, Any] = {}
+        for idx, spec in enumerate(self.token_specs):
+            label = tk.Label(frame, text=spec.display_label)
+            label.grid(row=idx, column=0, sticky="w", pady=4)
+
+            entry = tk.Entry(frame, show="*")
+            entry.grid(row=idx, column=1, sticky="ew", pady=4)
+            stored_value = prefill.get(spec.name)
+            if stored_value:
+                entry.insert(0, stored_value)
+            entries[spec.name] = entry
+
+        frame.columnconfigure(1, weight=1)
+
+        show_var = tk.BooleanVar(value=False)
+
+        def _toggle_visibility() -> None:
+            mask = "" if show_var.get() else "*"
+            for entry in entries.values():
+                entry.configure(show=mask)
+
+        toggle = tk.Checkbutton(
+            frame,
+            text="Show values",
+            variable=show_var,
+            command=_toggle_visibility,
+        )
+        toggle.grid(
+            row=len(self.token_specs),
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(8, 4),
+        )
+
+        status_var = tk.StringVar(value="")
+        status_label = tk.Label(
+            frame,
+            textvariable=status_var,
+            fg="#555",
+            wraplength=400,
+            justify="left",
+        )
+        status_label.grid(
+            row=len(self.token_specs) + 1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+
+        def _show_status(message: str, *, is_error: bool = False) -> None:
+            status_var.set(message)
+            status_label.configure(fg="#a33" if is_error else "#555")
+
+        def _finish(code: int) -> None:
+            exit_state["code"] = code
+            root.quit()
+
+        def _apply(parameters: dict[str, object]) -> tuple[bool, int, list[str]]:
+            payload = {
+                "command": "x_make_persistent_env_var_x",
+                "parameters": parameters,
+            }
+            result = main_json(payload, ctx=self._ctx)
+            if result.get("status") != "success":
+                message = (
+                    str(result.get("message"))
+                    if result.get("message")
+                    else "Token persistence failed."
+                )
+                details = result.get("details")
+                if isinstance(details, Mapping):
+                    breakdown = ", ".join(
+                        f"{key}: {value}" for key, value in details.items()
+                    )
+                    if breakdown:
+                        message = f"{message}\n{breakdown}"
+                messagebox.showerror("Persistence failed", message)
+                return False, 2, []
+
+            summary = result.get("summary")
+            exit_code = 1
+            if isinstance(summary, Mapping):
+                code_obj = summary.get("exit_code")
+                if isinstance(code_obj, int):
+                    exit_code = code_obj
+            messages: list[str] = []
+            raw_messages = result.get("messages")
+            if isinstance(raw_messages, Sequence):
+                messages = [str(item) for item in raw_messages if item]
+            return True, exit_code, messages
+
+        def _handle_persist() -> None:
+            _show_status("")
+
+            provided: dict[str, str] = {}
+            session_backfill: set[str] = set()
+            missing_required: list[str] = []
+            for spec in self.token_specs:
+                value = entries[spec.name].get().strip()
+                if value:
+                    provided[spec.name] = value
+                    continue
+                session_value = os.environ.get(spec.name)
+                if session_value:
+                    session_backfill.add(spec.name)
+                    continue
+                if spec.required:
+                    missing_required.append(spec.display_label or spec.name)
+
+            if missing_required:
+                messagebox.showwarning(
+                    "Tokens required",
+                    "Provide values for: " + ", ".join(missing_required),
+                )
+                return
+
+            if not provided and not session_backfill:
+                messagebox.showinfo(
+                    "No values provided",
+                    "Provide at least one token value before persisting.",
+                )
+                return
+
+            aggregated_messages: list[str] = []
+            had_failure = False
+
+            if provided:
+                ok, exit_code, messages = _apply(
+                    {
+                        "action": "persist-values",
+                        "tokens": [
+                            {
+                                "name": spec.name,
+                                "label": spec.display_label,
+                                "required": spec.required,
+                            }
+                            for spec in self.token_specs
+                            if spec.name in provided
+                        ],
+                        "values": provided,
+                        "quiet": self.quiet,
+                        "include_existing": True,
+                    }
+                )
+                if not ok:
+                    _show_status(
+                        "Token persistence failed; adjust the values and try again.",
+                        is_error=True,
+                    )
+                    return
+                aggregated_messages.extend(messages)
+                if exit_code != 0:
+                    had_failure = True
+
+            if not had_failure and session_backfill:
+                ok, exit_code, messages = _apply(
+                    {
+                        "action": "persist-current",
+                        "tokens": [
+                            {
+                                "name": spec.name,
+                                "label": spec.display_label,
+                                "required": spec.required,
+                            }
+                            for spec in self.token_specs
+                            if spec.name in session_backfill
+                        ],
+                        "quiet": self.quiet,
+                        "include_existing": True,
+                    }
+                )
+                if not ok:
+                    _show_status(
+                        "Token persistence failed; adjust the values and try again.",
+                        is_error=True,
+                    )
+                    return
+                aggregated_messages.extend(messages)
+                if exit_code != 0:
+                    had_failure = True
+
+            if had_failure:
+                summary = aggregated_messages or [
+                    "Token persistence reported an error. Adjust the values and try again.",
+                ]
+                _show_status("\n".join(summary), is_error=True)
+                return
+
+            success_messages = aggregated_messages or [
+                "Token persistence succeeded. Open a new PowerShell window for fresh shells.",
+            ]
+            messagebox.showinfo("Tokens persisted", "\n".join(success_messages))
+            _finish(0)
+
+        def _handle_cancel() -> None:
+            _finish(2)
+
+        button_row = len(self.token_specs) + 2
+        button_frame = tk.Frame(frame)
+        button_frame.grid(
+            row=button_row,
+            column=0,
+            columnspan=2,
+            sticky="e",
+            pady=(12, 0),
+        )
+
+        cancel_button = tk.Button(button_frame, text="Cancel", command=_handle_cancel)
+        cancel_button.pack(side="right")
+
+        persist_button = tk.Button(
+            button_frame,
+            text="Set Tokens",
+            command=_handle_persist,
+        )
+        persist_button.pack(side="right", padx=(8, 0))
+        persist_button.focus_set()
+
+        root.protocol("WM_DELETE_WINDOW", _handle_cancel)
+
+        try:
+            root.mainloop()
+        finally:
+            with suppress(Exception):
+                root.destroy()
+
+        return int(exit_state["code"])
 
     def _is_verbose(self) -> bool:
         attr: object = getattr(self._ctx, "verbose", False)
@@ -861,7 +1114,7 @@ def _run_cli(args: Sequence[str]) -> int:
     parser.add_argument(
         "--launch-gui",
         action="store_true",
-        help="Launch the PySide6 dialog instead of processing JSON payloads.",
+        help="Launch the Tkinter dialog instead of processing JSON payloads.",
     )
     parser.add_argument(
         "--json",
@@ -891,14 +1144,10 @@ def _run_cli(args: Sequence[str]) -> int:
         parser.error("--launch-gui cannot be combined with JSON input flags.")
 
     if launch_gui:
-        from .x_cls_make_persistent_env_var_gui_x import (
-            x_cls_make_persistent_env_var_gui_x,
-        )
-
-        runner = x_cls_make_persistent_env_var_gui_x(quiet=quiet)
+        runner = x_cls_make_persistent_env_var_x("", "", quiet=quiet)
         try:
             return runner.run_gui()
-        except RuntimeError as exc:  # Handles missing PySide6 dependencies.
+        except RuntimeError as exc:  # Handles missing Tkinter dependencies.
             _error(str(exc))
             return 1
 

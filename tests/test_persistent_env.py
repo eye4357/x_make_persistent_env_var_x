@@ -2,17 +2,23 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
-from x_make_persistent_env_var_x import (
-    x_cls_make_persistent_env_var_x as module,
-)
+import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
 
-x_cls_make_persistent_env_var_x = module.x_cls_make_persistent_env_var_x
+main_json = cast(
+    "Callable[[Mapping[str, object]], dict[str, object]]",
+    module.main_json,
+)
+x_cls_make_persistent_env_var_x = cast(
+    "type[Any]",
+    module.x_cls_make_persistent_env_var_x,
+)
 
 
 class TryEmit(Protocol):
@@ -76,6 +82,15 @@ def test_safe_call_and_try_emit() -> None:
     expect_equal(calls, ["success"], label="calls after try_emit")
 
 
+def test_default_token_specs_include_slack() -> None:
+    instance = x_cls_make_persistent_env_var_x(quiet=True)
+    slack_spec = next(
+        (spec for spec in instance.token_specs if spec.name == "SLACK_TOKEN"),
+        None,
+    )
+    expect(slack_spec is not None, "Slack token spec should be present")
+    assert slack_spec is not None
+    expect(slack_spec.required, "Slack token must be marked as required")
 def test_persist_current_sets_present_variables() -> None:
     state: dict[str, str] = {}
     tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
@@ -156,8 +171,8 @@ def test_main_json_persist_values_success() -> None:
         unexpected = f"Unexpected command: {command}"
         raise AssertionError(unexpected)
 
-    original = module.x_cls_make_persistent_env_var_x.run_powershell
-    module.x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)
+    original = x_cls_make_persistent_env_var_x.run_powershell
+    x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)  # type: ignore[assignment]
     try:
         payload = {
             "command": "x_make_persistent_env_var_x",
@@ -171,9 +186,9 @@ def test_main_json_persist_values_success() -> None:
                 "include_existing": True,
             }
         }
-        result = module.main_json(payload)
+        result = main_json(payload)
     finally:
-        module.x_cls_make_persistent_env_var_x.run_powershell = original
+        x_cls_make_persistent_env_var_x.run_powershell = original  # type: ignore[assignment]
 
     expect_equal(result.get("status"), "success", label="result status")
     summary = cast("dict[str, object]", result.get("summary", {}))
@@ -188,7 +203,7 @@ def test_main_json_invalid_payload_returns_failure() -> None:
         "command": "x_make_persistent_env_var_x",
         "parameters": {"action": "unsupported"},
     }
-    result = module.main_json(payload)
+    result = main_json(payload)
 
     expect_equal(result.get("status"), "failure", label="failure status")
     expect_equal(result.get("exit_code"), 2, label="failure exit code")
