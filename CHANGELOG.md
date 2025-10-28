@@ -8,6 +8,7 @@ I catalogue every substantive adjustment to this environment vault here. Entries
 - Hardened the CLI dispatcher: new `--launch-gui` flag, explicit JSON exit codes, and automatic injection of the `command` field for schema compliance.
 - Expanded test coverage with a CLI dispatch harness that stubs the Tk dialog flow to keep GUI verification in CI.
 - Default token suite now mandates `SLACK_TOKEN` so Slack automation never runs without a verified API credential.
+- Added optional `SLACK_BOT_TOKEN` support to the default token catalogue so bot-side Slack workflows can be staged without blocking existing runs.
 
 ## [0.20.4] - 2025-10-15
 ### Changed

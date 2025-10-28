@@ -7,7 +7,7 @@ This vault locks down environment variables so the lab never loses a credential 
 - Persist changes with JSON ledgers that the orchestrator and Change Control teams can audit.
 - Offer both JSON CLI and Tkinter control dialog surfaces so operators handle secrets the way the situation demands (and yes, I remain thoroughly disgusted that we had to crawl back to Tkinter).
 - Guard against drift with deterministic logging, registry safeguards, and typed interfaces.
-- Default vault profile now tracks `SLACK_TOKEN` alongside the PyPI and GitHub credentials so the Slack dump-and-reset runner never launches without a verified API key.
+- Default vault profile now tracks the required `SLACK_TOKEN` and optional `SLACK_BOT_TOKEN` alongside the PyPI and GitHub credentials so the Slack dump-and-reset runner never launches without a verified API key and we have the bot credential ready when automation expands.
 
 ## Instrumentation
 - Python 3.11 or newer.

@@ -91,6 +91,20 @@ def test_default_token_specs_include_slack() -> None:
     expect(slack_spec is not None, "Slack token spec should be present")
     assert slack_spec is not None
     expect(slack_spec.required, "Slack token must be marked as required")
+
+
+def test_default_token_specs_include_slack_bot_token() -> None:
+    instance = x_cls_make_persistent_env_var_x(quiet=True)
+    slack_bot_spec = next(
+        (spec for spec in instance.token_specs if spec.name == "SLACK_BOT_TOKEN"),
+        None,
+    )
+    expect(slack_bot_spec is not None, "Slack bot token spec should be present")
+    assert slack_bot_spec is not None
+    expect(
+        not slack_bot_spec.required,
+        "Slack bot token must remain optional for future workflows",
+    )
 def test_persist_current_sets_present_variables() -> None:
     state: dict[str, str] = {}
     tokens: list[tuple[str, str]] = [("FOO", "Foo token")]

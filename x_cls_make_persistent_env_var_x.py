@@ -95,11 +95,15 @@ def _error(*args: object) -> None:
 Token = tuple[str, str]
 
 
-_DEFAULT_TOKENS: tuple[Token, ...] = (
+_REQUIRED_TOKENS: tuple[Token, ...] = (
     ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
     ("PYPI_API_TOKEN", "PyPI API Token"),
     ("GITHUB_TOKEN", "GitHub Token"),
     ("SLACK_TOKEN", "Slack API Token"),
+)
+
+_OPTIONAL_TOKENS: tuple[Token, ...] = (
+    ("SLACK_BOT_TOKEN", "Slack Bot Token"),
 )
 
 SCHEMA_VERSION = "x_make_persistent_env_var_x.run/1.0"
@@ -118,7 +122,10 @@ class TokenSpec:
 
 _DEFAULT_TOKEN_SPECS: tuple[TokenSpec, ...] = tuple(
     TokenSpec(name=token_name, label=token_label, required=True)
-    for token_name, token_label in _DEFAULT_TOKENS
+    for token_name, token_label in _REQUIRED_TOKENS
+) + tuple(
+    TokenSpec(name=token_name, label=token_label, required=False)
+    for token_name, token_label in _OPTIONAL_TOKENS
 )
 
 
