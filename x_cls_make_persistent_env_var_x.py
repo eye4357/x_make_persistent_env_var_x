@@ -15,8 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType
-from typing import IO, Any, Protocol, TypeVar, cast
+from typing import IO, TYPE_CHECKING, Protocol, TypeVar, cast
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -26,17 +25,113 @@ from x_make_persistent_env_var_x.json_contracts import (
     OUTPUT_SCHEMA,
 )
 
-tk: ModuleType | None
-messagebox: ModuleType | None
-try:  # pragma: no cover - import guard to support headless environments
-    import tkinter as _tk_module
-    from tkinter import messagebox as _messagebox_module
-except ModuleNotFoundError:
-    tk = None
-    messagebox = None
+if TYPE_CHECKING:
+    import tkinter as tk
+    from tkinter import messagebox
+else:  # pragma: no cover - import guard to support headless environments
+    try:
+        import tkinter as tk  # type: ignore[assignment]
+        from tkinter import messagebox  # type: ignore[assignment]
+    except ModuleNotFoundError:
+        tk = None  # type: ignore[assignment]
+        messagebox = None  # type: ignore[assignment]
+
+
+class _TkRootProtocol(Protocol):
+    def title(self, title: str) -> None: ...
+
+    def geometry(self, geometry: str) -> None: ...
+
+    def resizable(self, width: bool, height: bool) -> None: ...  # noqa: FBT001
+
+    def protocol(self, name: str, func: Callable[[], object]) -> None: ...
+
+    def mainloop(self) -> None: ...
+
+    def destroy(self) -> None: ...
+
+    def quit(self) -> None: ...
+
+
+class _TkHasGrid(Protocol):
+    def grid(self, *args: object, **kwargs: object) -> None: ...
+
+
+class _TkHasPack(Protocol):
+    def pack(self, *args: object, **kwargs: object) -> None: ...
+
+
+class _TkFrameProtocol(_TkHasGrid, _TkHasPack, Protocol):
+    def columnconfigure(self, index: int, weight: int) -> None: ...
+
+
+class _TkLabelProtocol(_TkHasGrid, Protocol):
+    def configure(self, **kwargs: object) -> None: ...
+
+
+class _TkEntryProtocol(_TkHasGrid, Protocol):
+    def configure(self, **kwargs: object) -> None: ...
+
+    def get(self) -> str: ...
+
+    def insert(self, index: int, value: str) -> None: ...
+
+
+class _TkBooleanVarProtocol(Protocol):
+    def get(self) -> bool: ...
+
+    def set(self, value: bool) -> None: ...  # noqa: FBT001
+
+
+class _TkStringVarProtocol(Protocol):
+    def set(self, value: str) -> None: ...
+
+
+class _TkCheckbuttonProtocol(_TkHasGrid, Protocol):
+    pass
+
+
+class _TkButtonProtocol(_TkHasPack, Protocol):
+    def focus_set(self) -> None: ...
+
+
+_FactoryT_co = TypeVar("_FactoryT_co", covariant=True)
+
+
+class _TkFactory(Protocol[_FactoryT_co]):
+    def __call__(self, *args: object, **kwargs: object) -> _FactoryT_co: ...
+
+
+class _TkModuleProtocol(Protocol):
+    Tk: _TkFactory[_TkRootProtocol]
+    Frame: _TkFactory[_TkFrameProtocol]
+    Label: _TkFactory[_TkLabelProtocol]
+    Entry: _TkFactory[_TkEntryProtocol]
+    BooleanVar: _TkFactory[_TkBooleanVarProtocol]
+    Checkbutton: _TkFactory[_TkCheckbuttonProtocol]
+    Button: _TkFactory[_TkButtonProtocol]
+    StringVar: _TkFactory[_TkStringVarProtocol]
+
+
+class _MessageboxProtocol(Protocol):
+    def showwarning(self, title: str, message: str) -> None: ...
+
+    def showinfo(self, title: str, message: str) -> None: ...
+
+    def showerror(self, title: str, message: str) -> None: ...
+
+
+if TYPE_CHECKING:
+    _TK_MODULE: _TkModuleProtocol | None = cast("_TkModuleProtocol | None", tk)
+    _MESSAGEBOX_MODULE: _MessageboxProtocol | None = cast(
+        "_MessageboxProtocol | None", messagebox
+    )
+elif tk is None or messagebox is None:
+    _TK_MODULE = None
+    _MESSAGEBOX_MODULE = None
 else:
-    tk = _tk_module
-    messagebox = _messagebox_module
+    _TK_MODULE = cast("_TkModuleProtocol", tk)
+    _MESSAGEBOX_MODULE = cast("_MessageboxProtocol", messagebox)
 
 
 class _SchemaValidationError(Exception):
@@ -430,10 +525,8 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
             _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
 
-def _resolve_tkinter() -> tuple[ModuleType | None, ModuleType | None]:
-    if tk is None or messagebox is None:
-        return None, None
-    return tk, messagebox
+def _resolve_tkinter() -> tuple[_TkModuleProtocol | None, _MessageboxProtocol | None]:
+    return _TK_MODULE, _MESSAGEBOX_MODULE
 
 
 def _prompt_for_values(
@@ -470,19 +563,19 @@ class _TokenDialog:
         self,
         *,
         controller: x_cls_make_persistent_env_var_x,
-        tk: ModuleType,
-        messagebox: ModuleType,
+        tk: _TkModuleProtocol,
+        messagebox: _MessageboxProtocol,
     ) -> None:
         self._controller = controller
-        self._tk: Any = tk
-        self._messagebox: Any = messagebox
+        self._tk = tk
+        self._messagebox = messagebox
         self._exit_code = 2
-        self._entries: dict[str, Any] = {}
-        self._status_var: Any = None
-        self._status_label: Any = None
-        self._show_var: Any = None
-        self._window: Any = None
-        self._frame: Any = None
+        self._entries: dict[str, _TkEntryProtocol] = {}
+        self._status_var: _TkStringVarProtocol | None = None
+        self._status_label: _TkLabelProtocol | None = None
+        self._show_var: _TkBooleanVarProtocol | None = None
+        self._window: _TkRootProtocol | None = None
+        self._frame: _TkFrameProtocol | None = None
         self._prefill = _collect_prefill(
             controller.tokens,
             ctx=controller.context,
@@ -490,7 +583,7 @@ class _TokenDialog:
         )
 
     def run(self) -> int:
-        tk_mod = cast("Any", self._tk)
+        tk_mod = self._tk
         root = tk_mod.Tk()
         root.title("Persist Environment Tokens")
         root.geometry("460x320")
@@ -516,9 +609,10 @@ class _TokenDialog:
 
     def _build_form(self) -> None:
         if self._frame is None:
-            raise RuntimeError("Dialog frame is not initialised")
+            message = "Dialog frame is not initialised"
+            raise RuntimeError(message)
         frame = self._frame
-        tk_mod = cast("Any", self._tk)
+        tk_mod = self._tk
         controller = self._controller
 
         for idx, spec in enumerate(controller.token_specs):
@@ -538,9 +632,10 @@ class _TokenDialog:
         self._build_button_row()
 
     def _build_visibility_control(self) -> None:
-        tk_mod = cast("Any", self._tk)
+        tk_mod = self._tk
         if self._frame is None:
-            raise RuntimeError("Dialog frame is not initialised")
+            message = "Dialog frame is not initialised"
+            raise RuntimeError(message)
         toggle_row = len(self._controller.token_specs)
         self._show_var = tk_mod.BooleanVar(value=False)
 
@@ -559,7 +654,7 @@ class _TokenDialog:
         )
 
     def _build_status_area(self) -> None:
-        tk_mod = cast("Any", self._tk)
+        tk_mod = self._tk
         status_row = len(self._controller.token_specs) + 1
         self._status_var = tk_mod.StringVar(value="")
         status_label = tk_mod.Label(
@@ -578,10 +673,11 @@ class _TokenDialog:
         self._status_label = status_label
 
     def _build_button_row(self) -> None:
-        tk_mod = cast("Any", self._tk)
+        tk_mod = self._tk
         button_row = len(self._controller.token_specs) + 2
         if self._frame is None:
-            raise RuntimeError("Dialog frame is not initialised")
+            message = "Dialog frame is not initialised"
+            raise RuntimeError(message)
         frame = tk_mod.Frame(self._frame)
         frame.grid(
             row=button_row,
@@ -606,7 +702,8 @@ class _TokenDialog:
 
     def _toggle_visibility(self) -> None:
         if self._show_var is None:
-            raise RuntimeError("Visibility toggle not initialised")
+            message = "Visibility toggle not initialised"
+            raise RuntimeError(message)
         mask = "" if self._show_var.get() else "*"
         for entry in self._entries.values():
             entry.configure(show=mask)
@@ -616,7 +713,7 @@ class _TokenDialog:
 
     def _handle_persist(self) -> None:
         self._show_status("")
-        messagebox_mod = cast("Any", self._messagebox)
+        messagebox_mod = self._messagebox
         provided, backfill, missing = self._collect_inputs()
 
         if missing:
@@ -735,7 +832,7 @@ class _TokenDialog:
             "parameters": parameters_payload,
         }
 
-        messagebox_mod = cast("Any", self._messagebox)
+        messagebox_mod = self._messagebox
         result = main_json(payload, ctx=self._controller.context)
         if result.get("status") != "success":
             message = (
@@ -767,7 +864,8 @@ class _TokenDialog:
 
     def _show_status(self, message: str, *, is_error: bool = False) -> None:
         if self._status_var is None or self._status_label is None:
-            raise RuntimeError("Status widgets not initialised")
+            error_message = "Status widgets not initialised"
+            raise RuntimeError(error_message)
         self._status_var.set(message)
         self._status_label.configure(fg="#a33" if is_error else "#555")
 
@@ -1355,7 +1453,11 @@ def _run_cli(args: Sequence[str]) -> int:
     return 1
 
 
-__all__ = ["main_json", "x_cls_make_persistent_env_var_x"]
+def run_cli(args: Sequence[str]) -> int:
+    return _run_cli(list(args))
+
+
+__all__ = ["main_json", "run_cli", "x_cls_make_persistent_env_var_x"]
 
 
 if __name__ == "__main__":

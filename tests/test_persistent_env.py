@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from unittest.mock import patch
 
 import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
@@ -12,6 +11,9 @@ from x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x import (
     main_json,
     x_cls_make_persistent_env_var_x,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping
 
 
 class TryEmit(Protocol):
@@ -82,7 +84,8 @@ def test_default_token_specs_include_slack() -> None:
     )
     expect(slack_spec is not None, "Slack token spec should be present")
     if slack_spec is None:  # pragma: no cover - defensive narrow for type checkers
-        raise RuntimeError("Slack token spec unexpectedly missing")
+        error_message = "Slack token spec unexpectedly missing"
+        raise RuntimeError(error_message)
     expect(slack_spec.required, "Slack token must be marked as required")
 
 
@@ -94,7 +97,8 @@ def test_default_token_specs_include_slack_bot_token() -> None:
     )
     expect(slack_bot_spec is not None, "Slack bot token spec should be present")
     if slack_bot_spec is None:  # pragma: no cover - defensive narrow for type checkers
-        raise RuntimeError("Slack bot token spec unexpectedly missing")
+        error_message = "Slack bot token spec unexpectedly missing"
+        raise RuntimeError(error_message)
     expect(
         not slack_bot_spec.required,
         "Slack bot token must remain optional for future workflows",
@@ -126,10 +130,13 @@ def test_persist_current_sets_present_variables() -> None:
         unexpected_command = f"Unexpected command: {command}"
         raise AssertionError(unexpected_command)
 
-    with override_environ({"FOO": "secret"}), patch.object(
-        x_cls_make_persistent_env_var_x,
-        "run_powershell",
-        new=staticmethod(fake_run),
+    with (
+        override_environ({"FOO": "secret"}),
+        patch.object(
+            x_cls_make_persistent_env_var_x,
+            "run_powershell",
+            new=staticmethod(fake_run),
+        ),
     ):
         inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
         exit_code = inst.persist_current()
@@ -144,10 +151,13 @@ def test_persist_current_skips_missing_variables() -> None:
     def raise_run(command: str) -> subprocess.CompletedProcess[str]:
         raise AssertionError(command)
 
-    with override_environ({}), patch.object(
-        x_cls_make_persistent_env_var_x,
-        "run_powershell",
-        new=staticmethod(raise_run),
+    with (
+        override_environ({}),
+        patch.object(
+            x_cls_make_persistent_env_var_x,
+            "run_powershell",
+            new=staticmethod(raise_run),
+        ),
     ):
         inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
         exit_code = inst.persist_current()

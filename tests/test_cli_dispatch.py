@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
 from io import StringIO
-from typing import cast
 
 import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
 
-_run_cli = cast("Callable[[list[str]], int]", module._run_cli)
+EXPECTED_EXIT_CODE = 5
+
+
+def expect(*, condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
 
 
 def test_launch_gui_flag_invokes_tk_runner() -> None:
@@ -15,20 +18,30 @@ def test_launch_gui_flag_invokes_tk_runner() -> None:
 
     original_run_gui = module.x_cls_make_persistent_env_var_x.run_gui
 
-    def fake_run(self: object) -> int:
-        quiet = cast("bool", getattr(self, "quiet", False))
-        records.append(("run", quiet))
-        return 5
+    def fake_run(self: module.x_cls_make_persistent_env_var_x) -> int:
+        raw_quiet = getattr(self, "quiet", False)
+        if isinstance(raw_quiet, bool):
+            quiet_attr = raw_quiet
+        else:
+            quiet_attr = bool(raw_quiet)
+        records.append(("run", quiet_attr))
+        return EXPECTED_EXIT_CODE
 
     module.x_cls_make_persistent_env_var_x.run_gui = fake_run  # type: ignore[method-assign]
 
     stdout_original = sys.stdout
     sys.stdout = StringIO()
     try:
-        exit_code = _run_cli(["--launch-gui", "--quiet"])
+        exit_code = module.run_cli(["--launch-gui", "--quiet"])
     finally:
         module.x_cls_make_persistent_env_var_x.run_gui = original_run_gui  # type: ignore[method-assign]
         sys.stdout = stdout_original
 
-    assert exit_code == 5
-    assert records == [("run", True)]
+    expect(
+        condition=exit_code == EXPECTED_EXIT_CODE,
+        message="run_cli should return GUI exit code",
+    )
+    expect(
+        condition=records == [("run", True)],
+        message="run_gui should run with quiet flag",
+    )
