@@ -2,22 +2,14 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Protocol, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+from typing import Protocol, cast
 
 import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
-
-main_json = cast(
-    "Callable[[Mapping[str, object]], dict[str, object]]",
-    module.main_json,
-)
-x_cls_make_persistent_env_var_x = cast(
-    "type[Any]",
-    module.x_cls_make_persistent_env_var_x,
+from x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x import (
+    main_json,
+    x_cls_make_persistent_env_var_x,
 )
 
 
