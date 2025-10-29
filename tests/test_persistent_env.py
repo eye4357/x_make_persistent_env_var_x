@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Protocol, cast
+from unittest.mock import patch
 
 import x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x as module
 from x_make_persistent_env_var_x.x_cls_make_persistent_env_var_x import (
@@ -80,19 +81,20 @@ def test_default_token_specs_include_slack() -> None:
         None,
     )
     expect(slack_spec is not None, "Slack token spec should be present")
-    assert slack_spec is not None
+    if slack_spec is None:  # pragma: no cover - defensive narrow for type checkers
+        raise RuntimeError("Slack token spec unexpectedly missing")
     expect(slack_spec.required, "Slack token must be marked as required")
 
 
 def test_default_token_specs_include_slack_bot_token() -> None:
-
     instance = x_cls_make_persistent_env_var_x(quiet=True)
     slack_bot_spec = next(
         (spec for spec in instance.token_specs if spec.name == "SLACK_BOT_TOKEN"),
         None,
     )
     expect(slack_bot_spec is not None, "Slack bot token spec should be present")
-    assert slack_bot_spec is not None
+    if slack_bot_spec is None:  # pragma: no cover - defensive narrow for type checkers
+        raise RuntimeError("Slack bot token spec unexpectedly missing")
     expect(
         not slack_bot_spec.required,
         "Slack bot token must remain optional for future workflows",
@@ -124,13 +126,12 @@ def test_persist_current_sets_present_variables() -> None:
         unexpected_command = f"Unexpected command: {command}"
         raise AssertionError(unexpected_command)
 
-    class Harness(x_cls_make_persistent_env_var_x):
-        @staticmethod
-        def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
-            return fake_run(command)
-
-    with override_environ({"FOO": "secret"}):
-        inst = Harness(tokens=tokens, quiet=True)
+    with override_environ({"FOO": "secret"}), patch.object(
+        x_cls_make_persistent_env_var_x,
+        "run_powershell",
+        new=staticmethod(fake_run),
+    ):
+        inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
         exit_code = inst.persist_current()
 
     expect(exit_code == 0, "persist_current should succeed for present variable")
@@ -140,13 +141,15 @@ def test_persist_current_sets_present_variables() -> None:
 def test_persist_current_skips_missing_variables() -> None:
     tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
 
-    class Harness(x_cls_make_persistent_env_var_x):
-        @staticmethod
-        def run_powershell(command: str) -> subprocess.CompletedProcess[str]:
-            raise AssertionError(command)
+    def raise_run(command: str) -> subprocess.CompletedProcess[str]:
+        raise AssertionError(command)
 
-    with override_environ({}):
-        inst = Harness(tokens=tokens, quiet=True)
+    with override_environ({}), patch.object(
+        x_cls_make_persistent_env_var_x,
+        "run_powershell",
+        new=staticmethod(raise_run),
+    ):
+        inst = x_cls_make_persistent_env_var_x(tokens=tokens, quiet=True)
         exit_code = inst.persist_current()
 
     expect(
@@ -179,9 +182,11 @@ def test_main_json_persist_values_success() -> None:
         unexpected = f"Unexpected command: {command}"
         raise AssertionError(unexpected)
 
-    original = x_cls_make_persistent_env_var_x.run_powershell
-    x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)  # type: ignore[method-assign]
-    try:
+    with patch.object(
+        x_cls_make_persistent_env_var_x,
+        "run_powershell",
+        new=staticmethod(fake_run),
+    ):
         payload = {
             "command": "x_make_persistent_env_var_x",
             "parameters": {
@@ -195,8 +200,6 @@ def test_main_json_persist_values_success() -> None:
             },
         }
         result = main_json(payload)
-    finally:
-        x_cls_make_persistent_env_var_x.run_powershell = original  # type: ignore[method-assign]
 
     expect_equal(result.get("status"), "success", label="result status")
     summary = cast("dict[str, object]", result.get("summary", {}))

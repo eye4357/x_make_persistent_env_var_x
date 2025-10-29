@@ -15,20 +15,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Protocol, TypeVar, cast, no_type_check
-
-if TYPE_CHECKING:
-    import tkinter as tk
-    from tkinter import messagebox
-else:  # pragma: no cover - import guard to support headless environments
-    tk: object | None
-    messagebox: object | None
-    try:
-        import tkinter as tk  # type: ignore[import-not-found,no-redef]
-        from tkinter import messagebox  # type: ignore[import-not-found,no-redef]
-    except ModuleNotFoundError:
-        tk = None
-        messagebox = None
+from types import ModuleType
+from typing import IO, Any, Protocol, TypeVar, cast
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -37,6 +25,18 @@ from x_make_persistent_env_var_x.json_contracts import (
     INPUT_SCHEMA,
     OUTPUT_SCHEMA,
 )
+
+tk: ModuleType | None
+messagebox: ModuleType | None
+try:  # pragma: no cover - import guard to support headless environments
+    import tkinter as _tk_module
+    from tkinter import messagebox as _messagebox_module
+except ModuleNotFoundError:
+    tk = None
+    messagebox = None
+else:
+    tk = _tk_module
+    messagebox = _messagebox_module
 
 
 class _SchemaValidationError(Exception):
@@ -285,6 +285,10 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
         self.token_specs = resolved_specs
         self._ctx = ctx
 
+    @property
+    def context(self) -> object | None:
+        return self._ctx
+
     def _is_verbose(self) -> bool:
         attr: object = getattr(self._ctx, "verbose", False)
         if isinstance(attr, bool):
@@ -303,10 +307,7 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
         return result.returncode == 0
 
     def get_user_env(self) -> str | None:
-        command = (
-            "[Environment]::GetEnvironmentVariable("
-            f'"{self.var}", "User")'
-        )
+        command = "[Environment]::GetEnvironmentVariable(" f'"{self.var}", "User")'
         result = self.run_powershell(command)
         if result.returncode != 0:
             return None
@@ -408,7 +409,8 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
             return 1
         if not self.quiet:
             _info(
-                "All values set. Open a NEW PowerShell window for changes to take effect."
+                "All values set. Open a NEW PowerShell window "
+                "for changes to take effect."
             )
         return 0
 
@@ -428,7 +430,7 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
             _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
 
 
-def _resolve_tkinter() -> tuple[object | None, object | None]:
+def _resolve_tkinter() -> tuple[ModuleType | None, ModuleType | None]:
     if tk is None or messagebox is None:
         return None, None
     return tk, messagebox
@@ -461,7 +463,6 @@ def _prompt_for_values(
     return collected
 
 
-@no_type_check
 class _TokenDialog:
     """Encapsulate the Tkinter dialog orchestration."""
 
@@ -469,8 +470,8 @@ class _TokenDialog:
         self,
         *,
         controller: x_cls_make_persistent_env_var_x,
-        tk: object,
-        messagebox: object,
+        tk: ModuleType,
+        messagebox: ModuleType,
     ) -> None:
         self._controller = controller
         self._tk: Any = tk
@@ -484,19 +485,19 @@ class _TokenDialog:
         self._frame: Any = None
         self._prefill = _collect_prefill(
             controller.tokens,
-            ctx=controller._ctx,
+            ctx=controller.context,
             quiet=controller.quiet,
         )
 
     def run(self) -> int:
-        tk = self._tk
-        root = tk.Tk()
+        tk_mod = cast("Any", self._tk)
+        root = tk_mod.Tk()
         root.title("Persist Environment Tokens")
         root.geometry("460x320")
-        root.resizable(False, False)
+        root.resizable(width=False, height=False)
         self._window = root
 
-        frame = tk.Frame(root, padx=16, pady=16)
+        frame = tk_mod.Frame(root, padx=16, pady=16)
         frame.pack(fill="both", expand=True)
         self._frame = frame
 
@@ -514,16 +515,17 @@ class _TokenDialog:
     # --- construction helpers -------------------------------------------------
 
     def _build_form(self) -> None:
-        assert self._frame is not None
+        if self._frame is None:
+            raise RuntimeError("Dialog frame is not initialised")
         frame = self._frame
-        tk = self._tk
+        tk_mod = cast("Any", self._tk)
         controller = self._controller
 
         for idx, spec in enumerate(controller.token_specs):
-            label = tk.Label(frame, text=spec.display_label)
+            label = tk_mod.Label(frame, text=spec.display_label)
             label.grid(row=idx, column=0, sticky="w", pady=4)
 
-            entry = tk.Entry(frame, show="*")
+            entry = tk_mod.Entry(frame, show="*")
             entry.grid(row=idx, column=1, sticky="ew", pady=4)
             stored_value = self._prefill.get(spec.name)
             if stored_value:
@@ -536,12 +538,13 @@ class _TokenDialog:
         self._build_button_row()
 
     def _build_visibility_control(self) -> None:
-        tk = self._tk
-        assert self._frame is not None
+        tk_mod = cast("Any", self._tk)
+        if self._frame is None:
+            raise RuntimeError("Dialog frame is not initialised")
         toggle_row = len(self._controller.token_specs)
-        self._show_var = tk.BooleanVar(value=False)
+        self._show_var = tk_mod.BooleanVar(value=False)
 
-        toggle = tk.Checkbutton(
+        toggle = tk_mod.Checkbutton(
             self._frame,
             text="Show values",
             variable=self._show_var,
@@ -556,10 +559,10 @@ class _TokenDialog:
         )
 
     def _build_status_area(self) -> None:
-        tk = self._tk
+        tk_mod = cast("Any", self._tk)
         status_row = len(self._controller.token_specs) + 1
-        self._status_var = tk.StringVar(value="")
-        status_label = tk.Label(
+        self._status_var = tk_mod.StringVar(value="")
+        status_label = tk_mod.Label(
             self._frame,
             textvariable=self._status_var,
             fg="#555",
@@ -575,10 +578,11 @@ class _TokenDialog:
         self._status_label = status_label
 
     def _build_button_row(self) -> None:
-        tk = self._tk
-        messagebox = self._messagebox
+        tk_mod = cast("Any", self._tk)
         button_row = len(self._controller.token_specs) + 2
-        frame = tk.Frame(self._frame)
+        if self._frame is None:
+            raise RuntimeError("Dialog frame is not initialised")
+        frame = tk_mod.Frame(self._frame)
         frame.grid(
             row=button_row,
             column=0,
@@ -587,10 +591,10 @@ class _TokenDialog:
             pady=(12, 0),
         )
 
-        cancel_button = tk.Button(frame, text="Cancel", command=self._handle_cancel)
+        cancel_button = tk_mod.Button(frame, text="Cancel", command=self._handle_cancel)
         cancel_button.pack(side="right")
 
-        persist_button = tk.Button(
+        persist_button = tk_mod.Button(
             frame,
             text="Set Tokens",
             command=self._handle_persist,
@@ -598,12 +602,11 @@ class _TokenDialog:
         persist_button.pack(side="right", padx=(8, 0))
         persist_button.focus_set()
 
-        self._messagebox = messagebox
-
     # --- callbacks ------------------------------------------------------------
 
     def _toggle_visibility(self) -> None:
-        assert self._show_var is not None
+        if self._show_var is None:
+            raise RuntimeError("Visibility toggle not initialised")
         mask = "" if self._show_var.get() else "*"
         for entry in self._entries.values():
             entry.configure(show=mask)
@@ -613,17 +616,18 @@ class _TokenDialog:
 
     def _handle_persist(self) -> None:
         self._show_status("")
+        messagebox_mod = cast("Any", self._messagebox)
         provided, backfill, missing = self._collect_inputs()
 
         if missing:
-            self._messagebox.showwarning(
+            messagebox_mod.showwarning(
                 "Tokens required",
                 "Provide values for: " + ", ".join(missing),
             )
             return
 
         if not provided and not backfill:
-            self._messagebox.showinfo(
+            messagebox_mod.showinfo(
                 "No values provided",
                 "Provide at least one token value before persisting.",
             )
@@ -670,9 +674,12 @@ class _TokenDialog:
             return
 
         success_messages = aggregated_messages or [
-            "Token persistence succeeded. Open a new PowerShell window for fresh shells.",
+            (
+                "Token persistence succeeded. "
+                "Open a new PowerShell window for fresh shells."
+            ),
         ]
-        self._messagebox.showinfo(
+        messagebox_mod.showinfo(
             "Tokens persisted",
             "\n".join(success_messages),
         )
@@ -728,7 +735,8 @@ class _TokenDialog:
             "parameters": parameters_payload,
         }
 
-        result = main_json(payload, ctx=self._controller._ctx)
+        messagebox_mod = cast("Any", self._messagebox)
+        result = main_json(payload, ctx=self._controller.context)
         if result.get("status") != "success":
             message = (
                 str(result.get("message"))
@@ -742,7 +750,7 @@ class _TokenDialog:
                 )
                 if breakdown:
                     message = f"{message}\n{breakdown}"
-            self._messagebox.showerror("Persistence failed", message)
+            messagebox_mod.showerror("Persistence failed", message)
             return False, 2, []
 
         summary = result.get("summary")
@@ -758,7 +766,8 @@ class _TokenDialog:
         return True, exit_code, messages
 
     def _show_status(self, message: str, *, is_error: bool = False) -> None:
-        assert self._status_var is not None and self._status_label is not None
+        if self._status_var is None or self._status_label is None:
+            raise RuntimeError("Status widgets not initialised")
         self._status_var.set(message)
         self._status_label.configure(fg="#a33" if is_error else "#555")
 
