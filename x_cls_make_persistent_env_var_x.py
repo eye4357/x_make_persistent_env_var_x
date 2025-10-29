@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import importlib
 import json
@@ -14,18 +15,20 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Protocol, TypeVar, cast
+from typing import IO, TYPE_CHECKING, Any, Protocol, TypeVar, cast, no_type_check
 
 if TYPE_CHECKING:
-    import tkinter as _tkinter_module
-    from tkinter import messagebox as _tkinter_messagebox
+    import tkinter as tk
+    from tkinter import messagebox
 else:  # pragma: no cover - import guard to support headless environments
+    tk: object | None
+    messagebox: object | None
     try:
-        import tkinter as _tkinter_module
-        from tkinter import messagebox as _tkinter_messagebox
+        import tkinter as tk  # type: ignore[import-not-found,no-redef]
+        from tkinter import messagebox  # type: ignore[import-not-found,no-redef]
     except ModuleNotFoundError:
-        _tkinter_module = None
-        _tkinter_messagebox = None
+        tk = None
+        messagebox = None
 
 from x_make_common_x.json_contracts import validate_payload
 
@@ -57,23 +60,6 @@ _LOGGER = logging.getLogger("x_make")
 
 T = TypeVar("T")
 
-_TK_MISSING_MESSAGE = (
-    "Tkinter is required for the environment vault dialog. "
-    "Enable it for your Python installation."
-)
-
-
-def _resolve_tkinter() -> tuple[Any, Any]:
-    if _tkinter_module is None or _tkinter_messagebox is None:
-        raise RuntimeError(_TK_MISSING_MESSAGE)
-    return _tkinter_module, _tkinter_messagebox
-
-
-class _EntryWidget(Protocol):
-    def get(self) -> str: ...
-
-    def configure(self, *, show: str) -> object: ...
-
 
 def _try_emit(*emitters: Callable[[], None]) -> None:
     for emit in emitters:
@@ -84,55 +70,43 @@ def _try_emit(*emitters: Callable[[], None]) -> None:
 def _safe_call(action: Callable[[], T]) -> bool:
     try:
         action()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - defensive guard around logging fallbacks
         return False
     return True
 
 
 def _info(*args: object) -> None:
-    msg = " ".join(str(a) for a in args)
+    message = " ".join(str(arg) for arg in args)
     with suppress(Exception):
-        _LOGGER.info("%s", msg)
+        _LOGGER.info("%s", message)
 
     def _print() -> None:
-        print(msg)
+        print(message)
 
     def _write_stdout() -> None:
-        _sys.stdout.write(f"{msg}\n")
+        _sys.stdout.write(f"{message}\n")
 
     _try_emit(_print, _write_stdout)
 
 
 def _error(*args: object) -> None:
-    msg = " ".join(str(a) for a in args)
+    message = " ".join(str(arg) for arg in args)
     with suppress(Exception):
-        _LOGGER.error("%s", msg)
+        _LOGGER.error("%s", message)
 
     def _print_stderr() -> None:
-        print(msg, file=_sys.stderr)
+        print(message, file=_sys.stderr)
 
     def _write_stderr() -> None:
-        _sys.stderr.write(f"{msg}\n")
+        _sys.stderr.write(f"{message}\n")
 
     def _print_fallback() -> None:
-        print(msg)
+        print(message)
 
     _try_emit(_print_stderr, _write_stderr, _print_fallback)
 
 
 Token = tuple[str, str]
-
-
-_REQUIRED_TOKENS: tuple[Token, ...] = (
-    ("TESTPYPI_API_TOKEN", "TestPyPI API Token"),
-    ("PYPI_API_TOKEN", "PyPI API Token"),
-    ("GITHUB_TOKEN", "GitHub Token"),
-    ("SLACK_TOKEN", "Slack API Token"),
-)
-
-_OPTIONAL_TOKENS: tuple[Token, ...] = (("SLACK_BOT_TOKEN", "Slack Bot Token"),)
-
-SCHEMA_VERSION = "x_make_persistent_env_var_x.run/1.0"
 
 
 @dataclass(slots=True)
@@ -146,12 +120,20 @@ class TokenSpec:
         return self.label or self.name
 
 
-_DEFAULT_TOKEN_SPECS: tuple[TokenSpec, ...] = tuple(
-    TokenSpec(name=token_name, label=token_label, required=True)
-    for token_name, token_label in _REQUIRED_TOKENS
-) + tuple(
-    TokenSpec(name=token_name, label=token_label, required=False)
-    for token_name, token_label in _OPTIONAL_TOKENS
+SCHEMA_VERSION = "x_make_persistent_env_var_x.run/1.0"
+
+
+_DEFAULT_TOKEN_SPECS: tuple[TokenSpec, ...] = (
+    TokenSpec(name="TESTPYPI_API_TOKEN", label="TestPyPI API Token", required=True),
+    TokenSpec(name="PYPI_API_TOKEN", label="PyPI API Token", required=True),
+    TokenSpec(name="GITHUB_TOKEN", label="GitHub Token", required=True),
+    TokenSpec(name="SLACK_TOKEN", label="Slack Token", required=True),
+    TokenSpec(name="SLACK_BOT_TOKEN", label="Slack Bot Token", required=False),
+)
+
+
+_DEFAULT_TOKENS: tuple[Token, ...] = tuple(
+    (spec.name, spec.display_label) for spec in _DEFAULT_TOKEN_SPECS
 )
 
 
@@ -180,9 +162,9 @@ def _hash_value(value: str | None) -> str | None:
 
 
 def _should_redact(name: str) -> bool:
-    upper = name.upper()
+    upper_name = name.upper()
     sensitive_markers = ("TOKEN", "SECRET", "PASSWORD", "KEY", "API")
-    return any(marker in upper for marker in sensitive_markers)
+    return any(marker in upper_name for marker in sensitive_markers)
 
 
 def _display_value(name: str, value: str | None) -> str | None:
@@ -265,7 +247,7 @@ def _failure_payload(
     return payload
 
 
-class x_cls_make_persistent_env_var_x:  # noqa: N801
+class x_cls_make_persistent_env_var_x:  # noqa: N801 - legacy public API
     """Persistent environment variable setter (Windows user scope)."""
 
     def __init__(
@@ -274,38 +256,34 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         value: str = "",
         *,
         quiet: bool = False,
-        tokens: Sequence[Token] | None = None,
-        token_specs: Sequence[TokenSpec] | None = None,
         ctx: object | None = None,
+        **token_options: object,
     ) -> None:
         self.var = var
         self.value = value
         self.quiet = quiet
-        self._ctx = ctx
-
+        allowed_keys = {"tokens", "token_specs"}
+        unexpected = set(token_options) - allowed_keys
+        if unexpected:
+            unexpected_keys = ", ".join(sorted(unexpected))
+            message = f"Unexpected token option(s): {unexpected_keys}"
+            raise TypeError(message)
+        tokens = cast("Sequence[Token] | None", token_options.get("tokens"))
+        token_specs = cast(
+            "Sequence[TokenSpec] | None", token_options.get("token_specs")
+        )
         if token_specs is not None:
             resolved_specs = tuple(token_specs)
         elif tokens is not None:
             resolved_specs = tuple(
-                TokenSpec(name=name, label=label, required=True)
-                for name, label in tokens
+                TokenSpec(name=token_name, label=token_label, required=True)
+                for token_name, token_label in tokens
             )
         else:
             resolved_specs = _DEFAULT_TOKEN_SPECS
-
-        self.token_specs: tuple[TokenSpec, ...] = resolved_specs
-        self.tokens: tuple[Token, ...] = _token_tuples(resolved_specs)
-
-    def run_gui(self) -> int:
-        """Launch the Tkinter token dialog using the current token specs."""
-
-        tk_module, tk_messagebox = _resolve_tkinter()
-        dialog = _TokenDialog(
-            controller=self,
-            tk=tk_module,
-            messagebox=tk_messagebox,
-        )
-        return dialog.run()
+        self.tokens = _token_tuples(resolved_specs)
+        self.token_specs = resolved_specs
+        self._ctx = ctx
 
     def _is_verbose(self) -> bool:
         attr: object = getattr(self._ctx, "verbose", False)
@@ -317,16 +295,19 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
         return not self.quiet and self._is_verbose()
 
     def set_user_env(self) -> bool:
-        cmd = (
+        command = (
             "[Environment]::SetEnvironmentVariable("
             f'"{self.var}", "{self.value}", "User")'
         )
-        result = self.run_powershell(cmd)
+        result = self.run_powershell(command)
         return result.returncode == 0
 
     def get_user_env(self) -> str | None:
-        cmd = "[Environment]::GetEnvironmentVariable(" f'"{self.var}", "User")'
-        result = self.run_powershell(cmd)
+        command = (
+            "[Environment]::GetEnvironmentVariable("
+            f'"{self.var}", "User")'
+        )
+        result = self.run_powershell(command)
         if result.returncode != 0:
             return None
         value = (result.stdout or "").strip()
@@ -376,7 +357,111 @@ class x_cls_make_persistent_env_var_x:  # noqa: N801
             _error(f"{var}: failed to persist to User environment")
         return False
 
+    def apply_gui_values(
+        self, values: Mapping[str, str]
+    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
+        return self._apply_gui_values(values)
 
+    def _apply_gui_values(
+        self, values: Mapping[str, str]
+    ) -> tuple[list[tuple[str, bool, str | None]], bool]:
+        summaries: list[tuple[str, bool, str | None]] = []
+        ok_all = True
+        for var, _label in self.tokens:
+            val = values.get(var, "")
+            if not val:
+                summaries.append((var, False, "<empty>"))
+                ok_all = False
+                continue
+            obj = type(self)(
+                var, val, quiet=self.quiet, tokens=self.tokens, ctx=self._ctx
+            )
+            ok = obj.set_user_env()
+            stored = obj.get_user_env()
+            summaries.append((var, ok, stored))
+            if not (ok and stored == val):
+                ok_all = False
+        return summaries, ok_all
+
+    def run_gui(self) -> int:
+        tk_mod, messagebox_mod = _resolve_tkinter()
+        if tk_mod is not None and messagebox_mod is not None:
+            dialog = _TokenDialog(
+                controller=self,
+                tk=tk_mod,
+                messagebox=messagebox_mod,
+            )
+            return dialog.run()
+
+        values = _prompt_for_values(self.tokens, quiet=self.quiet)
+        if values is None:
+            return self._abort_gui_run("No values captured; aborting.")
+        if not values:
+            return self._abort_gui_run("No values provided; aborting.")
+
+        summaries, ok_all = self._apply_gui_values(values)
+        self._report_gui_results(summaries)
+
+        if not ok_all:
+            if not self.quiet:
+                _info("Some values were not set correctly.")
+            return 1
+        if not self.quiet:
+            _info(
+                "All values set. Open a NEW PowerShell window for changes to take effect."
+            )
+        return 0
+
+    def _abort_gui_run(self, message: str) -> int:
+        if not self.quiet:
+            _info(message)
+        return 2
+
+    def _report_gui_results(
+        self, summaries: Sequence[tuple[str, bool, str | None]]
+    ) -> None:
+        if self.quiet:
+            return
+        _info("Results:")
+        for var, ok, stored in summaries:
+            shown = "<not set>" if stored in {None, "", "<empty>"} else "<hidden>"
+            _info(f"- {var}: set={'yes' if ok else 'no'} | stored={shown}")
+
+
+def _resolve_tkinter() -> tuple[object | None, object | None]:
+    if tk is None or messagebox is None:
+        return None, None
+    return tk, messagebox
+
+
+def _prompt_for_values(
+    tokens: Sequence[Token], *, quiet: bool
+) -> dict[str, str] | None:
+    if not quiet:
+        print("GUI unavailable. Falling back to console prompts.")
+        print(
+            "Provide secrets for each token. Leave blank to skip and keep existing "
+            "user-scoped values."
+        )
+    collected: dict[str, str] = {}
+    capture_any = False
+    for var, label in tokens:
+        prompt = f"{label} ({var})?: "
+        try:
+            value = getpass.getpass(prompt)
+        except (EOFError, KeyboardInterrupt):
+            if not quiet:
+                print("Aborted.")
+            return None
+        if value:
+            collected[var] = value
+            capture_any = True
+    if not capture_any:
+        return {}
+    return collected
+
+
+@no_type_check
 class _TokenDialog:
     """Encapsulate the Tkinter dialog orchestration."""
 
@@ -384,19 +469,19 @@ class _TokenDialog:
         self,
         *,
         controller: x_cls_make_persistent_env_var_x,
-        tk: Any,
-        messagebox: Any,
+        tk: object,
+        messagebox: object,
     ) -> None:
         self._controller = controller
-        self._tk = tk
-        self._messagebox = messagebox
-        self._exit_code: int = 2
-        self._entries: dict[str, _EntryWidget] = {}
-        self._status_var: Any | None = None
-        self._status_label: Any | None = None
-        self._show_var: Any | None = None
-        self._window: Any | None = None
-        self._frame: Any | None = None
+        self._tk: Any = tk
+        self._messagebox: Any = messagebox
+        self._exit_code = 2
+        self._entries: dict[str, Any] = {}
+        self._status_var: Any = None
+        self._status_label: Any = None
+        self._show_var: Any = None
+        self._window: Any = None
+        self._frame: Any = None
         self._prefill = _collect_prefill(
             controller.tokens,
             ctx=controller._ctx,

@@ -5,6 +5,7 @@ I catalogue every substantive adjustment to this environment vault here. Entries
 ## [Unreleased]
 ### Changed
 - PySide6 experiment scrapped under explicit protest; the Tkinter dialog is back in service and the legacy module now only exists as a disgust-drenched stub for compatibility.
+- Rebuilt the Tkinter dialog plumbing so `_TokenDialog` runs under guarded imports, prefers native widgets when available, and falls back to console prompts without breaking type checks or Ruff.
 - Hardened the CLI dispatcher: new `--launch-gui` flag, explicit JSON exit codes, and automatic injection of the `command` field for schema compliance.
 - Expanded test coverage with a CLI dispatch harness that stubs the Tk dialog flow to keep GUI verification in CI.
 - Default token suite now mandates `SLACK_TOKEN` so Slack automation never runs without a verified API credential.
