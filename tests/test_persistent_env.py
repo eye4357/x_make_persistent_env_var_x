@@ -57,8 +57,7 @@ def test_safe_call_and_try_emit() -> None:
     try_emit_attr = "_try_emit"
 
     safe_call = cast(
-        "Callable[[Callable[[], None]], bool]",
-        getattr(module, safe_call_attr),
+        "Callable[[Callable[[], None]], bool]", getattr(module, safe_call_attr)
     )
     try_emit = cast("TryEmit", getattr(module, try_emit_attr))
 
@@ -86,6 +85,7 @@ def test_default_token_specs_include_slack() -> None:
 
 
 def test_default_token_specs_include_slack_bot_token() -> None:
+
     instance = x_cls_make_persistent_env_var_x(quiet=True)
     slack_bot_spec = next(
         (spec for spec in instance.token_specs if spec.name == "SLACK_BOT_TOKEN"),
@@ -97,6 +97,8 @@ def test_default_token_specs_include_slack_bot_token() -> None:
         not slack_bot_spec.required,
         "Slack bot token must remain optional for future workflows",
     )
+
+
 def test_persist_current_sets_present_variables() -> None:
     state: dict[str, str] = {}
     tokens: list[tuple[str, str]] = [("FOO", "Foo token")]
@@ -178,7 +180,7 @@ def test_main_json_persist_values_success() -> None:
         raise AssertionError(unexpected)
 
     original = x_cls_make_persistent_env_var_x.run_powershell
-    x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)  # type: ignore[assignment]
+    x_cls_make_persistent_env_var_x.run_powershell = staticmethod(fake_run)  # type: ignore[method-assign]
     try:
         payload = {
             "command": "x_make_persistent_env_var_x",
@@ -190,11 +192,11 @@ def test_main_json_persist_values_success() -> None:
                 ],
                 "values": {"ALPHA": "value-alpha", "BETA": "value-beta"},
                 "include_existing": True,
-            }
+            },
         }
         result = main_json(payload)
     finally:
-        x_cls_make_persistent_env_var_x.run_powershell = original  # type: ignore[assignment]
+        x_cls_make_persistent_env_var_x.run_powershell = original  # type: ignore[method-assign]
 
     expect_equal(result.get("status"), "success", label="result status")
     summary = cast("dict[str, object]", result.get("summary", {}))
