@@ -19,11 +19,8 @@ def test_launch_gui_flag_invokes_tk_runner() -> None:
     original_run_gui = module.x_cls_make_persistent_env_var_x.run_gui
 
     def fake_run(self: module.x_cls_make_persistent_env_var_x) -> int:
-        raw_quiet = getattr(self, "quiet", False)
-        if isinstance(raw_quiet, bool):
-            quiet_attr = raw_quiet
-        else:
-            quiet_attr = bool(raw_quiet)
+        raw_quiet: object = getattr(self, "quiet", False)
+        quiet_attr = bool(raw_quiet)
         records.append(("run", quiet_attr))
         return EXPECTED_EXIT_CODE
 
