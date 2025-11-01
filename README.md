@@ -38,19 +38,8 @@ Use the CLI to script changes or launch the GUI to edit variables interactively.
 | Static contract scan | `python -m pyright` |
 | Functional verification | `pytest` |
 
-## System Linkage
-- [Changelog](./CHANGELOG.md)
-- [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
-- [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
-
 ## Reconstitution Drill
 On the monthly rebuild I certify this vault on a sterile machine: list variables, set and unset entries, export the ledger, and confirm the orchestrator recognises the evidence. I log OS build, Python version, and run time; any anomaly gets recorded in Change Control and resolved immediately.
-
-## Cross-Referenced Assets
-- [x_make_common_x](../x_make_common_x/README.md) — logging and subprocess harnesses supporting registry work.
-- [x_make_pip_updates_x](../x_make_pip_updates_x/README.md) — depends on accurate environment toggles during package refreshes.
-- [x_0_make_all_x](../x_0_make_all_x/README.md) — orchestrator that refuses to run without verified environment state.
-
 ## Conduct Code
 Every mutation demands a ledger entry: variable name, scope, rationale. No improvisation. Environments are hazardous materials—label them or lose your license.
 
