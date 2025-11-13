@@ -29,14 +29,14 @@ if TYPE_CHECKING:
     from tkinter import messagebox
 else:  # pragma: no cover - import guard to support headless environments
     try:
-        import tkinter as _tk
-        from tkinter import messagebox as _messagebox
+        import tkinter as tk  # type: ignore[import-not-found]
+        from tkinter import messagebox  # type: ignore[import-not-found]
     except ModuleNotFoundError:
-        tk = None
-        messagebox = None
+        tk = cast("None", None)
+        messagebox = cast("None", None)
     else:
-        tk = cast("object", _tk)
-        messagebox = cast("object", _messagebox)
+        tk = cast("object", tk)
+        messagebox = cast("object", messagebox)
 
 
 class _TkRootProtocol(Protocol):
@@ -155,8 +155,6 @@ ValidationErrorType: type[_SchemaValidationError] = _load_validation_error()
 
 _LOGGER = logging.getLogger("x_make")
 
-T = TypeVar("T")
-
 
 def _try_emit(*emitters: Callable[[], None]) -> None:
     for emit in emitters:
@@ -164,7 +162,7 @@ def _try_emit(*emitters: Callable[[], None]) -> None:
             break
 
 
-def _safe_call(action: Callable[[], T]) -> bool:
+def _safe_call(action: Callable[[], object]) -> bool:
     try:
         action()
     except Exception:  # noqa: BLE001 - defensive guard around logging fallbacks
