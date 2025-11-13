@@ -29,11 +29,14 @@ if TYPE_CHECKING:
     from tkinter import messagebox
 else:  # pragma: no cover - import guard to support headless environments
     try:
-        import tkinter as tk  # type: ignore[assignment]
-        from tkinter import messagebox  # type: ignore[assignment]
+        import tkinter as _tk
+        from tkinter import messagebox as _messagebox
     except ModuleNotFoundError:
-        tk = None  # type: ignore[assignment]
-        messagebox = None  # type: ignore[assignment]
+        tk = None
+        messagebox = None
+    else:
+        tk = cast("object", _tk)
+        messagebox = cast("object", _messagebox)
 
 
 class _TkRootProtocol(Protocol):
